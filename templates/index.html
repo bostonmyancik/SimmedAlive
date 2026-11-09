@@ -6,74 +6,272 @@
 <title>Life sim</title>
 <style>
   :root {
-    --bg: #faf9f5; --surface: #f0eee6; --text: #1f1e1d; --text-secondary: #5f5e5a;
-    --text-muted: #888780; --border: #d3d1c7;
+    --bg: #faf9f5; --surface: #f0eee6; --panel: #f5f3ec; --land: #e6e2d3; --text: #1f1e1d;
+    --text-secondary: #5f5e5a; --text-muted: #888780; --border: #d3d1c7; --accent: #6a61d1;
+    --overlay: rgba(250, 249, 245, 0.9);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1f1e1d; --surface: #2c2c2a; --text: #f1efe8; --text-secondary: #b4b2a9;
-      --text-muted: #888780; --border: #444441;
+      --bg: #1a1918; --surface: #2c2c2a; --panel: #222120; --land: #262523; --text: #f1efe8;
+      --text-secondary: #b4b2a9; --text-muted: #888780; --border: #444441; --accent: #9d96ea;
+      --overlay: rgba(34, 33, 32, 0.9);
     }
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
   body {
-    margin: 0; padding: 24px 16px 40px; background: var(--bg); color: var(--text);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
   }
-  main { max-width: 980px; margin: 0 auto; }
-  h1 { font-size: 20px; font-weight: 500; margin: 0 0 12px; }
-  canvas { display: block; width: 100%; }
-  #world { border: 1px solid var(--border); border-radius: 12px; cursor: crosshair; }
-  #hist { height: 110px; margin-bottom: 18px; }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; font-size: 13px; color: var(--text-secondary); margin: 10px 0 14px; }
-  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
-  #cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
-  .card { background: var(--surface); border-radius: 8px; padding: 12px 16px; }
-  .label { font-size: 13px; color: var(--text-secondary); }
-  .big { font-size: 26px; font-weight: 500; }
-  .detail { font-size: 12px; color: var(--text-secondary); }
-  .caption { font-size: 13px; color: var(--text-secondary); margin-bottom: 2px; }
-  .row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-  .row label { font-size: 14px; color: var(--text-secondary); min-width: 110px; }
-  .row input { flex: 1; accent-color: #7F77DD; }
-  .row output { font-size: 14px; font-weight: 500; min-width: 44px; text-align: right; }
-  .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
   button {
-    font: inherit; font-size: 14px; color: var(--text); background: transparent;
-    border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; cursor: pointer;
+    font: inherit; color: var(--text); background: transparent; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px;
   }
   button:hover { background: var(--surface); }
   button:active { transform: scale(0.98); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type=range] { accent-color: var(--accent); }
+
+  .app {
+    display: grid; height: 100vh; height: 100dvh;
+    grid-template: "rail map side" minmax(0, 1fr) "bar bar bar" auto / 68px minmax(0, 1fr) 340px;
+  }
+
+  /* Tool rail */
+  .rail {
+    grid-area: rail; background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0;
+  }
+  .tool {
+    width: 54px; padding: 8px 0 5px; border-color: transparent; font-size: 11px; color: var(--text-secondary);
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+  }
+  .tool svg { width: 20px; height: 20px; }
+  .tool[aria-pressed=true] { background: var(--surface); border-color: var(--border); color: var(--text); }
+
+  /* Map */
+  .map { grid-area: map; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  #world { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  #world.dragging { cursor: grabbing; }
+  #world.food { cursor: crosshair; }
+  .float {
+    position: absolute; background: var(--overlay); border: 1px solid var(--border);
+    border-radius: 10px; backdrop-filter: blur(6px);
+  }
+  .layers { top: 10px; right: 10px; display: flex; padding: 3px; gap: 2px; }
+  .layers button { border: 0; padding: 4px 10px; font-size: 13px; color: var(--text-secondary); border-radius: 7px; }
+  .layers button[aria-pressed=true] { background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+  .zoom { right: 10px; bottom: 10px; display: flex; flex-direction: column; padding: 3px; gap: 2px; }
+  .zoom button { border: 0; width: 34px; height: 30px; padding: 0; font-size: 16px; border-radius: 7px; }
+  .zoom #zoomFit { font-size: 11px; }
+  .legend {
+    left: 10px; bottom: 10px; padding: 6px 10px; font-size: 12px; color: var(--text-secondary);
+    display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; max-width: calc(100% - 70px);
+  }
+  .legend:empty { display: none; }
+  .ramp { display: inline-block; width: 70px; height: 8px; border-radius: 4px; margin: 0 6px; vertical-align: middle; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .banner {
+    top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 14px 20px; text-align: center;
+    font-size: 15px;
+  }
+  .banner button { display: block; margin: 10px auto 0; }
+
+  /* Sidebar */
+  .sidebar {
+    grid-area: side; background: var(--panel); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .handle { display: none; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
+  .tabs button {
+    flex: 1; border: 0; border-radius: 0; padding: 11px 4px 9px; font-size: 13px; color: var(--text-secondary);
+    border-bottom: 2px solid transparent;
+  }
+  .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
+  .panel { padding: 14px; overflow-y: auto; flex: 1; min-height: 0; }
+  .panel[hidden] { display: none; }
+  .panel h2 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 18px 0 8px; }
+  .panel h2:first-child { margin-top: 0; }
+  .hint { color: var(--text-secondary); font-size: 13px; margin: 0 0 10px; }
+
+  .card { background: var(--surface); border-radius: 10px; padding: 11px 14px; margin-bottom: 10px; }
+  .card .name { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; }
+  .card .count { font-size: 26px; font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .card .share { height: 4px; border-radius: 2px; background: var(--border); margin: 6px 0 8px; overflow: hidden; }
+  .card .share i { display: block; height: 100%; border-radius: 2px; }
+  .card.extinct .count { color: var(--text-muted); }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; margin: 0; }
+  .facts dt { color: var(--text-secondary); }
+  .facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .meter { margin-bottom: 10px; font-size: 13px; }
+  .meter .row { display: flex; justify-content: space-between; color: var(--text-secondary); }
+  .meter .track { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 3px; }
+  .meter .track i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  #inspTitle { font-size: 17px; font-weight: 500; display: flex; align-items: center; margin-bottom: 2px; }
+  #inspStatus { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; }
+  #hist { display: block; width: 100%; height: 190px; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+
+  .field { margin-bottom: 14px; }
+  .field .row { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary); }
+  .field output { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .field input[type=range] { width: 100%; margin: 4px 0 0; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  .seedrow { display: flex; gap: 8px; margin-bottom: 8px; }
+  .seedrow input {
+    flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
+  }
+
+  /* Bottom bar */
+  .bar {
+    grid-area: bar; background: var(--panel); border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; padding: 8px 12px; position: relative; z-index: 2;
+  }
+  #pause { min-width: 78px; }
+  .speed { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+  .speed input { width: 110px; }
+  .speed output { min-width: 36px; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+  #clock { font-size: 13px; color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .timeline { flex: 1; min-width: 80px; height: 26px; position: relative; border-radius: 6px; overflow: hidden; }
+  #timeline { display: block; width: 100%; height: 100%; }
+  .marker {
+    position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px; cursor: help;
+    display: flex; justify-content: center;
+  }
+  .marker::before { content: ""; width: 3px; height: 100%; background: var(--text); border-radius: 1px; }
+  .marker.heat::before { background: #e24b4a; }
+  .marker.cold::before { background: #378add; }
+
+  /* Narrow screens: the sidebar becomes a sheet over the bottom of the map. */
+  @media (max-width: 760px) {
+    .app { grid-template: "map" minmax(0, 1fr) "bar" auto / minmax(0, 1fr); }
+    .rail {
+      grid-area: map; z-index: 1; align-self: start; justify-self: start; margin: 10px;
+      border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; background: var(--overlay);
+    }
+    .tool { width: 46px; padding: 6px 0 3px; }
+    .layers { left: 70px; right: 10px; overflow-x: auto; }
+    .layers button { padding: 4px 8px; }
+    .sidebar {
+      grid-area: map; z-index: 2; align-self: end; max-height: 62%;
+      border-left: 0; border-top: 1px solid var(--border); border-radius: 14px 14px 0 0;
+    }
+    .handle {
+      display: block; border: 0; border-radius: 0; padding: 7px 0 3px; width: 100%; flex: none;
+    }
+    .handle::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto; }
+    .handle:hover { background: transparent; }
+    .sidebar:not(.open) .panel { display: none; }
+    .sidebar:not(.open) .tabs { border-bottom: 0; }
+    .zoom, .legend { bottom: 72px; }
+    .bar { flex-wrap: wrap; gap: 8px 12px; }
+    .speed input { width: 80px; }
+    .timeline { flex-basis: 100%; height: 18px; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <h1>Life sim</h1>
-  <canvas id="world"></canvas>
-  <div class="legend">
-    <span><span class="sw" style="background:#185FA5"></span>Water</span>
-    <span><span class="sw" style="background:#F09595"></span>Hot</span>
-    <span><span class="sw" style="background:#B5D4F4"></span>Cold</span>
-    <span><span class="dot" style="background:#639922;width:6px;height:6px"></span>Food</span>
-    <span>Bigger body = stronger</span>
-    <span>Blue ring = thirsty</span>
-    <span>Click the map to drop food</span>
-  </div>
-  <div id="cards"></div>
-  <div class="caption">Population of each species over time <span id="seed" style="float:right"></span></div>
-  <canvas id="hist"></canvas>
-  <div class="row"><label for="fRate">Food supply</label><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"><output id="fOut">1.0</output></div>
-  <div class="row"><label for="mut">Mutation rate</label><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"><output id="mutOut">0.4</output></div>
-  <div class="row"><label for="spd">Time speed</label><input type="range" id="spd" min="0" max="6" step="1" value="4"><output id="spdOut">4x</output></div>
-  <div class="buttons">
-    <button id="heat">Heat wave</button>
-    <button id="cold">Cold snap</button>
-    <button id="tmp">Hide temperature</button>
-    <button id="pause">Pause</button>
-    <button id="reset">New world</button>
-  </div>
-</main>
-<script type="module" src="{{ url_for('static', filename='ui.js') }}"></script>
+<div class="app">
+  <nav class="rail" aria-label="Tools">
+    <button class="tool" data-tool="select" aria-pressed="true" title="Select a creature (1)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M5 3l10 7-4.5 1L13 16l-2 1-2.5-5L5 15z"/></svg>
+      Select
+    </button>
+    <button class="tool" data-tool="food" aria-pressed="false" title="Drop food (2)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17V9"/><path d="M10 11c0-4 2.5-6.5 6.5-6.5C16.500 8.500 14 11 10 11z"/><path d="M10 13c0-2.500-1.500-4-4.500-4 0 2.500 1.500 4 4.500 4z"/></svg>
+      Food
+    </button>
+  </nav>
+
+  <section class="map" id="map">
+    <canvas id="world" aria-label="World map"></canvas>
+    <div class="float layers" id="layers" role="group" aria-label="Map layer">
+      <button data-layer="temperature" aria-pressed="true">Temperature</button>
+      <button data-layer="fertility" aria-pressed="false">Fertility</button>
+      <button data-layer="territory" aria-pressed="false">Territory</button>
+      <button data-layer="none" aria-pressed="false">None</button>
+    </div>
+    <div class="float legend" id="legend"></div>
+    <div class="float zoom">
+      <button id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="zoomOut" title="Zoom out" aria-label="Zoom out">&minus;</button>
+      <button id="zoomFit" title="Show the whole world">Fit</button>
+    </div>
+    <div class="float banner" id="banner" hidden>
+      Everything died.
+      <button id="bannerNew">New world</button>
+    </div>
+  </section>
+
+  <aside class="sidebar" id="sidebar">
+    <button class="handle" id="handle" aria-label="Show or hide the panel"></button>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="species" aria-selected="true">Species</button>
+      <button role="tab" data-tab="inspector" aria-selected="false">Inspector</button>
+      <button role="tab" data-tab="charts" aria-selected="false">Charts</button>
+      <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </div>
+
+    <div class="panel" id="tab-species" role="tabpanel">
+      <div id="cards"></div>
+      <p class="hint">Bigger body means stronger. A blue ring means thirsty.</p>
+    </div>
+
+    <div class="panel" id="tab-inspector" role="tabpanel" hidden>
+      <p class="hint" id="inspEmpty">Choose the Select tool and click a creature on the map to inspect it.</p>
+      <div id="inspBody" hidden>
+        <div id="inspTitle"></div>
+        <div id="inspStatus"></div>
+        <div class="meter"><div class="row"><span>Energy</span><span id="inspEnergy"></span></div><div class="track"><i id="inspEnergyBar"></i></div></div>
+        <div class="meter"><div class="row"><span>Water</span><span id="inspWater"></span></div><div class="track"><i id="inspWaterBar"></i></div></div>
+        <div class="meter"><div class="row"><span>Age</span><span id="inspAge"></span></div><div class="track"><i id="inspAgeBar"></i></div></div>
+        <h2>Traits</h2>
+        <dl class="facts">
+          <dt>Generation</dt><dd id="inspGen"></dd>
+          <dt>Speed</dt><dd id="inspSpeed"></dd>
+          <dt>Vision</dt><dd id="inspVision"></dd>
+          <dt>Strength</dt><dd id="inspStrength"></dd>
+          <dt>Prefers</dt><dd id="inspPrefers"></dd>
+          <dt>Temperature here</dt><dd id="inspHere"></dd>
+        </dl>
+        <div class="buttons" style="margin-top:16px"><button id="inspClear">Clear selection</button></div>
+      </div>
+    </div>
+
+    <div class="panel" id="tab-charts" role="tabpanel" hidden>
+      <h2>Population over time</h2>
+      <canvas id="hist"></canvas>
+      <div class="key" id="chartKey"></div>
+      <p class="hint" style="margin-top:14px">The strip in the bottom bar shows each species' share over the same period, with marks for heat waves, cold snaps and extinctions.</p>
+    </div>
+
+    <div class="panel" id="tab-settings" role="tabpanel" hidden>
+      <h2>Environment</h2>
+      <div class="field"><div class="row"><label for="fRate">Food supply</label><output id="fOut">1.0</output></div><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"></div>
+      <div class="field"><div class="row"><label for="mut">Mutation rate</label><output id="mutOut">0.4</output></div><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"></div>
+      <div class="buttons">
+        <button id="heat">Heat wave</button>
+        <button id="cold">Cold snap</button>
+      </div>
+      <h2>World</h2>
+      <div class="seedrow">
+        <input id="seedInput" type="text" inputmode="numeric" aria-label="World seed">
+        <button id="seedLoad">Load seed</button>
+      </div>
+      <p class="hint">The same seed always builds the same world.</p>
+      <div class="buttons"><button id="reset">New world</button></div>
+    </div>
+  </aside>
+
+  <footer class="bar">
+    <button id="pause" title="Pause or resume (Space)">Pause</button>
+    <div class="speed"><label for="spd">Speed</label><input type="range" id="spd" min="0" max="6" step="1" value="4"><output id="spdOut">4x</output></div>
+    <div id="clock"></div>
+    <div class="timeline" aria-label="Population timeline"><canvas id="timeline"></canvas><div id="markers"></div></div>
+  </footer>
+</div>
+<script type="module" src="{{ url_for('static', filename='ui/main.js') }}"></script>
 </body>
 </html>

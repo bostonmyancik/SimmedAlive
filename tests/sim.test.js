@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createSim } from '../static/sim/sim.js';
 import { RULES, SPECIES } from '../static/sim/params.js';
-import { WIDTH, HEIGHT, cellIndex } from '../static/sim/world.js';
+import { WIDTH, HEIGHT, GRID_W, CELL, cellIndex, seasonAt } from '../static/sim/world.js';
 
 const snapshot = (sim) => JSON.stringify([sim.creatures, [...sim.food], sim.kills]);
 
@@ -100,7 +100,7 @@ test('a creature eats food it reaches', () => {
 test('food cannot be dropped in water', () => {
   const sim = emptyWorld();
   const i = sim.water.indexOf(1);
-  assert.equal(sim.addFood((i % 68) * 10 + 5, Math.floor(i / 68) * 10 + 5), false);
+  assert.equal(sim.addFood((i % GRID_W) * CELL + 5, Math.floor(i / GRID_W) * CELL + 5), false);
   assert.equal(sim.food.size, 0);
 });
 
@@ -177,6 +177,14 @@ test('creatures die of old age, starvation and thirst', () => {
 test('parameter overrides apply without changing the defaults', () => {
   const sim = createSim({ seed: 1, params: { foodGrowth: 0 } });
   assert.equal(sim.params.foodGrowth, 0);
-  assert.equal(createSim().params.foodGrowth, 5);
+  assert.equal(createSim().params.foodGrowth, 20);
   assert.equal(sim.species, SPECIES);
+});
+
+test('the year starts in spring and peaks in summer', () => {
+  assert.deepEqual(seasonAt(0), { year: 1, season: 'Spring' });
+  assert.equal(seasonAt(Math.round(RULES.seasonLength * Math.PI / 2)).season, 'Summer');
+  assert.equal(seasonAt(Math.round(RULES.seasonLength * Math.PI)).season, 'Autumn');
+  assert.equal(seasonAt(Math.round(RULES.seasonLength * Math.PI * 1.5)).season, 'Winter');
+  assert.equal(seasonAt(Math.round(RULES.seasonLength * Math.PI * 2) + 10).year, 2);
 });

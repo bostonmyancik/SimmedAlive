@@ -16,7 +16,7 @@ export const DEFAULT_PARAMS = {
   frontStrength: 8,        // peak degrees added (or removed) by a weather front
 
   // Food
-  foodGrowth: 5,           // multiplier on the food supply slider
+  foodGrowth: 20,          // multiplier on the food supply slider
 
   // Combat
   combatDamage: 0.2,       // damage per tick per point of strength
@@ -37,12 +37,12 @@ export const RULES = {
   seasonLength: 3000,          // ticks per radian of the seasonal sine wave
   boostDecay: 0.9994,          // per-tick fade of a heat wave or cold snap
   frontRadiusSq: 14000,        // spread of a weather front (pixels squared)
-  lakeCount: 6,
+  lakeCount: 24,
 
-  startPerSpecies: 25,
-  startFood: 150,
-  maxFood: 450,                // natural growth stops here (dropped food can exceed it)
-  maxCreatures: 450,
+  startPerSpecies: 100,
+  startFood: 600,
+  maxFood: 1800,               // natural growth stops here (dropped food can exceed it)
+  maxCreatures: 1800,
   maxAge: 3000,
 
   startEnergy: 60,

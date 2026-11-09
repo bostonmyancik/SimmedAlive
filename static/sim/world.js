@@ -3,8 +3,8 @@
 
 import { RULES } from './params.js';
 
-export const GRID_W = 68;
-export const GRID_H = 34;
+export const GRID_W = 136;
+export const GRID_H = 68;
 export const CELL = 10; // pixels per grid cell
 export const WIDTH = GRID_W * CELL;
 export const HEIGHT = GRID_H * CELL;
@@ -67,6 +67,16 @@ export function computeWaterDistance(water, distance) {
       }
     }
   }
+}
+
+const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
+const YEAR_TICKS = 2 * Math.PI * RULES.seasonLength;
+
+// The year (starting at 1) and season name for a tick. Summer is the warm peak.
+export function seasonAt(tick) {
+  const phase = (tick / RULES.seasonLength) % (2 * Math.PI);
+  const quarter = Math.floor(((phase + Math.PI / 4) % (2 * Math.PI)) / (Math.PI / 2));
+  return { year: Math.floor(tick / YEAR_TICKS) + 1, season: SEASONS[quarter] };
 }
 
 // Recomputes the temperature of every cell: a north-south gradient, the

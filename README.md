@@ -23,16 +23,22 @@ source .venv/bin/activate && python3 app.py
 
 ## Controls
 
-- Click the map to drop food.
-- Space pauses and resumes.
-- "New world" generates new lakes and weather fronts from a new seed.
-- The current seed is shown under the map. Open `http://127.0.0.1:5000/?seed=123` to start from a particular world.
+- **Map**: drag to pan (the world wraps around east-west), scroll or pinch to zoom, or use the + / − / Fit buttons.
+- **Tools** (left rail): Select (key `1`) inspects the creature you click; Food (key `2`) drops food where you click.
+- **Layers** (top of the map): temperature, fertility (how readily food grows), territory (which species dominates each area), or none.
+- **Sidebar tabs**: Species, Inspector, Charts and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
+- **Bottom bar**: pause (or Space), speed, the tick, year and season, and a timeline with marks for heat waves, cold snaps and extinctions.
+- **Settings**: food supply, mutation rate, heat wave, cold snap, and the world seed. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared.
 
 ## Where things live
 
 - `app.py`: the Flask server (one route).
 - `templates/index.html`: page layout and styles.
-- `static/ui.js`: drawing, controls, and the animation loop.
+- `static/ui/`: the page.
+  - `main.js`: animation loop, tools, panels and bottom bar. Start reading here.
+  - `camera.js`: zoom and pan.
+  - `mapview.js`: draws the world and the map layers.
+  - `charts.js`: the population chart and the timeline strip.
 - `static/sim/`: the simulation. No page code, so it also runs under Node.
   - `params.js`: every tuning value (species traits, balance settings, fixed rules).
   - `sim.js`: world generation and the per-tick rules. Start reading here.

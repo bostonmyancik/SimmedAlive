@@ -15,6 +15,9 @@ const BUCKET_SIZE = 40; // pixels; roughly a typical vision radius
 // Directions a creature probes when looking for a better temperature.
 const TEMP_PROBES = [[30, 0], [-30, 0], [0, 30], [0, -30]];
 
+// Velocity of each weather front in pixels per tick. They alternate warm, cold.
+const FRONT_DRIFTS = [[0.12, 0.05], [-0.09, 0.07], [0.07, -0.06], [-0.11, -0.04]];
+
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // Creates a simulation. Call sim.generate() to build a world, then sim.step().
@@ -41,6 +44,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     step,
     stats,
     addFood,
+    fertility,
   };
 
   // Rebuilt at the start of every tick to find nearby enemies quickly.
@@ -63,11 +67,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
     generateLakes(sim.water, random);
     computeWaterDistance(sim.water, sim.waterDistance);
 
-    // One warm front and one cold front, drifting in different directions.
-    sim.fronts = [
-      { x: random() * WIDTH, y: random() * HEIGHT, vx: 0.12, vy: 0.05, strength: P.frontStrength },
-      { x: random() * WIDTH, y: random() * HEIGHT, vx: -0.09, vy: 0.07, strength: -P.frontStrength },
-    ];
+    // Warm and cold fronts, each drifting in its own direction.
+    sim.fronts = FRONT_DRIFTS.map(([vx, vy], i) => ({
+      x: random() * WIDTH,
+      y: random() * HEIGHT,
+      vx,
+      vy,
+      strength: i % 2 ? -P.frontStrength : P.frontStrength,
+    }));
     refreshTemperature();
 
     // Each species starts in its own band: cold north, mild middle, hot south.
@@ -76,7 +83,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
         let x, y, tries = 0;
         do {
           x = random() * WIDTH;
-          y = clamp((s + 0.5) * HEIGHT / 3 + (random() - 0.5) * 90, 0, HEIGHT - 1);
+          y = clamp((s + 0.5) * HEIGHT / 3 + (random() - 0.5) * HEIGHT * 0.26, 0, HEIGHT - 1);
         } while (sim.water[cellIndex(x, y)] && tries++ < 50);
         sim.creatures.push(spawnCreature(s, x, y, random));
       }
@@ -95,7 +102,16 @@ export function createSim({ seed = 1, params = {} } = {}) {
     return true;
   }
 
-  // Food sprouts at random, more often near water and rarely in extreme cold or heat.
+  // Chance (0 to 1) that food sprouting in a land cell takes hold:
+  // higher near water, much lower in extreme cold or heat.
+  function fertility(cell) {
+    const temp = sim.temperature[cell];
+    const nearWater = 0.2 + 0.8 * Math.exp(-sim.waterDistance[cell] / 5);
+    const climate = temp < -4 || temp > 40 ? 0.15 : 1;
+    return nearWater * climate;
+  }
+
+  // Food sprouts at random spots, subject to how fertile the land is there.
   function growFood(foodRate) {
     let budget = foodRate * P.foodGrowth;
     while (budget > 0) {
@@ -103,10 +119,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
         const x = random() * WIDTH, y = random() * HEIGHT;
         const cell = cellIndex(x, y);
         if (!sim.water[cell]) {
-          const temp = sim.temperature[cell];
-          const nearWater = 0.2 + 0.8 * Math.exp(-sim.waterDistance[cell] / 5);
-          const climate = temp < -4 || temp > 40 ? 0.15 : 1;
-          if (random() < nearWater * climate) sim.food.add({ x, y });
+          if (random() < fertility(cell)) sim.food.add({ x, y });
         }
       }
       budget -= 1;
