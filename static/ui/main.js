@@ -4,20 +4,20 @@
 import { createSim } from '../sim/sim.js';
 import { randomSeed } from '../sim/rng.js';
 import { RULES } from '../sim/params.js';
-import { WIDTH, HEIGHT, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
+import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
-import { createMapView } from './mapview.js';
-import { SAMPLE_EVERY, drawPopulationChart, drawTimeline, windowStart, windowSpan } from './charts.js';
+import { createMapView, terrainColors } from './mapview.js';
+import { SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan } from './charts.js';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 12];
 const REFRESH_EVERY = 6; // frames between panel and layer refreshes
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
+const dot = (color) => '<span class="dot" style="background:' + color + '"></span>';
 
 // Open the page with ?seed=123 to replay a particular world.
 const urlSeed = Number(new URLSearchParams(location.search).get('seed'));
 const sim = createSim({ seed: Number.isInteger(urlSeed) && urlSeed > 0 ? urlSeed : randomSeed() });
-const species = sim.species;
 
 const canvas = $('world');
 const camera = createCamera(WIDTH, HEIGHT);
@@ -27,44 +27,50 @@ let paused = false;
 let tool = 'select';       // 'select' | 'food'
 let selected = null;       // the creature shown in the Inspector
 let selectedDiedAt = null; // tick at which it died, if it has
-let history = [];          // [{ tick, counts }]
-let events = [];           // [{ tick, kind, label }]
-let alive = species.map(() => true);
+let following = false;     // keep the camera on the selected creature
+let history = [];          // samples: { tick, counts, traits }
 let debt = 0;              // fractional ticks owed to the simulation
 let frameCount = 0;
+let eventsShown = -1;      // fingerprint of the event list already rendered
+
+// Species worth showing: founders, and new ones once they have taken hold.
+const shownSpecies = () => sim.species.filter((sp) => sp.established);
+const livingSpecies = () => shownSpecies().filter((sp) => sp.count > 0).sort((a, b) => b.count - a.count);
+
+function dietWords(diet) {
+  const percent = Math.round(diet * 100) + '% meat';
+  if (diet < 0.1) return 'Plants (' + percent + ')';
+  if (diet < 0.4) return 'Mostly plants (' + percent + ')';
+  if (diet < 0.6) return 'Mixed (' + percent + ')';
+  if (diet < 0.9) return 'Mostly meat (' + percent + ')';
+  return 'Meat (' + percent + ')';
+}
 
 // ---------- Panels ----------
 
-function buildSpeciesCards() {
-  $('cards').innerHTML = species.map((sp, i) =>
-    '<div class="card" id="card' + i + '">' +
-    '<div class="name"><span class="dot" style="background:' + sp.color + '"></span>' + sp.name + '</div>' +
-    '<div class="count" id="count' + i + '">0</div>' +
-    '<div class="share"><i id="share' + i + '" style="background:' + sp.color + '"></i></div>' +
-    '<dl class="facts" id="facts' + i + '"></dl></div>').join('');
-  $('chartKey').innerHTML = species.map((sp) =>
-    '<span><span class="dot" style="background:' + sp.color + '"></span>' + sp.name + '</span>').join('');
-}
-
 function refreshSpecies() {
   const stats = sim.stats();
-  const total = stats.reduce((sum, st) => sum + st.count, 0) || 1;
-  stats.forEach((st, i) => {
-    $('card' + i).classList.toggle('extinct', !st.count);
-    $('count' + i).textContent = st.count ? fmt(st.count) : 'Extinct';
-    $('share' + i).style.width = (st.count / total * 100) + '%';
-    $('facts' + i).innerHTML = st.count
-      ? '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
-        '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
-        '<dt>Vision</dt><dd>' + Math.round(st.vision) + '</dd>' +
-        '<dt>Prefers</dt><dd>' + Math.round(st.preferredTemp) + '°C</dd>' +
-        '<dt>Kills</dt><dd>' + fmt(st.kills) + '</dd>' +
-        '<dt>Latest generation</dt><dd>' + st.maxGeneration + '</dd>'
-      : '<dt>Kills before dying out</dt><dd>' + fmt(st.kills) + '</dd>';
-
-    if (alive[i] && !st.count) addEvent('extinct', species[i].name + ' died out');
-    alive[i] = st.count > 0;
-  });
+  const living = livingSpecies();
+  const total = sim.creatures.length || 1;
+  $('cards').innerHTML = living.map((sp) => {
+    const st = stats[sp.id];
+    return '<div class="card">' +
+      '<div class="name">' + dot(sp.color) + sp.name +
+      (sp.parent !== null ? '<span class="split">from ' + sim.species[sp.parent].name + '</span>' : '') + '</div>' +
+      '<div class="count">' + fmt(sp.count) + '</div>' +
+      '<div class="share"><i style="background:' + sp.color + ';width:' + (sp.count / total * 100) + '%"></i></div>' +
+      '<dl class="facts">' +
+      '<dt>Diet</dt><dd>' + dietWords(st.diet) + '</dd>' +
+      '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
+      '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
+      '<dt>Vision</dt><dd>' + Math.round(st.vision) + '</dd>' +
+      '<dt>Prefers</dt><dd>' + Math.round(st.preferredTemp) + '°C</dd>' +
+      '<dt>Kills</dt><dd>' + fmt(sp.kills) + '</dd>' +
+      '<dt>Latest generation</dt><dd>' + st.maxGeneration + '</dd>' +
+      '</dl></div>';
+  }).join('');
+  const extinct = shownSpecies().filter((sp) => sp.count === 0);
+  $('extinctList').textContent = extinct.length ? 'Extinct: ' + extinct.map((sp) => sp.name).join(', ') : '';
 }
 
 function setMeter(id, text, fraction) {
@@ -77,9 +83,12 @@ function refreshInspector() {
   $('inspBody').hidden = !selected;
   if (!selected) return;
   const c = selected;
-  if (selectedDiedAt === null && !sim.creatures.includes(c)) selectedDiedAt = sim.tick;
+  if (selectedDiedAt === null && !sim.creatures.includes(c)) {
+    selectedDiedAt = sim.tick;
+    setFollowing(false);
+  }
 
-  const sp = species[c.species];
+  const sp = sim.species[c.species];
   const here = sim.temperature[cellIndex(c.x, c.y)];
   const gap = here - c.preferredTemp;
   const stressed = Math.abs(gap) > sim.params.tempTolerance;
@@ -88,7 +97,7 @@ function refreshInspector() {
   else status = [c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
     .filter(Boolean).join(' · ') || 'Comfortable';
 
-  $('inspTitle').innerHTML = '<span class="dot" style="background:' + sp.color + '"></span>' + sp.name;
+  $('inspTitle').innerHTML = dot(sp.color) + sp.name;
   $('inspStatus').textContent = status;
   setMeter('inspEnergy', Math.max(0, c.energy).toFixed(0) + ' (splits above ' + RULES.breedEnergy + ')', c.energy / RULES.breedEnergy);
   setMeter('inspWater', Math.max(0, c.hydration).toFixed(0) + ' of 100', c.hydration / 100);
@@ -97,15 +106,39 @@ function refreshInspector() {
   $('inspSpeed').textContent = c.speed.toFixed(2);
   $('inspVision').textContent = c.vision.toFixed(0);
   $('inspStrength').textContent = c.strength.toFixed(2);
+  $('inspDiet').textContent = dietWords(c.diet);
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
+  $('inspBorn').textContent = c.bornTick ? 'Tick ' + fmt(c.bornTick) : 'At the start';
+  $('inspOffspring').textContent = c.offspring;
+  $('inspAncestry').innerHTML = sim.lineage(c.species)
+    .map((id) => dot(sim.species[id].color) + sim.species[id].name).join(' &rarr; ') +
+    '<br>Generation ' + c.generation + ' of its line.';
+  $('inspFollow').disabled = selectedDiedAt !== null;
+}
+
+function setFollowing(on) {
+  following = on;
+  $('inspFollow').setAttribute('aria-pressed', on);
+  $('inspFollow').textContent = on ? 'Following' : 'Follow';
 }
 
 function select(creature) {
   selected = creature;
   selectedDiedAt = null;
+  setFollowing(false);
   refreshInspector();
   if (creature) showTab('inspector');
+}
+
+function refreshEvents() {
+  const newest = sim.events.length ? sim.events[sim.events.length - 1].tick : -1;
+  const key = newest * 1000 + sim.events.length;
+  if (key === eventsShown) return;
+  eventsShown = key;
+  $('eventsEmpty').hidden = sim.events.length > 0;
+  $('events').innerHTML = sim.events.slice().reverse().map((e) =>
+    '<li class="' + e.kind + '"><span class="pip"></span><span class="when">Tick ' + fmt(e.tick) + '</span><span>' + e.text + '</span></li>').join('');
 }
 
 function showTab(name) {
@@ -118,10 +151,25 @@ function showTab(name) {
   drawCharts();
 }
 
-// ---------- Bottom bar ----------
+// ---------- Charts and bottom bar ----------
 
-function addEvent(kind, label) {
-  events.push({ tick: sim.tick, kind, label });
+const traitMetric = (trait, label) => ({ label, floor: 0, valueOf: (s, id) => (s.counts[id] ? s.traits[id][trait] : null) });
+const METRICS = {
+  count: { fromZero: true, label: (v) => fmt(v) + ' creatures', valueOf: (s, id) => s.counts[id] ?? null },
+  speed: traitMetric('speed', (v) => v.toFixed(2)),
+  vision: traitMetric('vision', (v) => v.toFixed(0)),
+  strength: traitMetric('strength', (v) => v.toFixed(2)),
+  preferredTemp: { ...traitMetric('preferredTemp', (v) => v.toFixed(1) + '°C'), floor: -Infinity },
+  diet: traitMetric('diet', (v) => Math.round(v * 100) + '% meat'),
+};
+
+function drawCharts() {
+  const shown = shownSpecies();
+  drawTimeline($('timeline'), history, shown, sim.tick);
+  if ($('tab-charts').hidden) return;
+  drawLineChart($('hist'), history, shown, sim.tick, METRICS[$('metric').value]);
+  $('chartKey').innerHTML = livingSpecies().map((sp) => '<span>' + dot(sp.color) + sp.name + '</span>').join('');
+  drawFamilyTree($('tree'), shown, sim.species, sim.tick);
 }
 
 function refreshClock() {
@@ -131,41 +179,56 @@ function refreshClock() {
 
 function refreshMarkers() {
   const start = windowStart(sim.tick), span = windowSpan(sim.tick);
-  events = events.filter((e) => e.tick >= start);
-  $('markers').innerHTML = events.map((e) =>
+  $('markers').innerHTML = sim.events.filter((e) => e.tick >= start).map((e) =>
     '<span class="marker ' + e.kind + '" style="left:' + ((e.tick - start) / span * 100).toFixed(2) + '%" title="' +
-    e.label + ' (tick ' + fmt(e.tick) + ')"></span>').join('');
-}
-
-function drawCharts() {
-  drawPopulationChart($('hist'), history, species, sim.tick);
-  drawTimeline($('timeline'), history, species, sim.tick);
+    e.text + ' (tick ' + fmt(e.tick) + ')"></span>').join('');
 }
 
 function refreshAll() {
   refreshSpecies();
   refreshInspector();
+  refreshEvents();
   refreshClock();
   refreshMarkers();
+  refreshLegend();
   drawCharts();
   $('banner').hidden = sim.creatures.length > 0;
 }
 
 // ---------- Map overlays ----------
 
+function terrainKey() {
+  const colors = terrainColors();
+  const swatch = (kind, name) => '<span><span class="sw" style="background:' + colors[kind] + '"></span>' + name + '</span>';
+  return swatch(FERTILE, 'Fertile') + swatch(PLAIN, 'Plain') + swatch(DESERT, 'Desert') + swatch(MOUNTAIN, 'Mountain');
+}
+
+function territoryKey() {
+  const living = livingSpecies();
+  return living.slice(0, 6).map((sp) => '<span>' + dot(sp.color) + sp.name + '</span>').join('') +
+    (living.length > 6 ? '<span>+' + (living.length - 6) + ' more</span>' : '');
+}
+
 const LEGENDS = {
-  temperature: 'Cold<span class="ramp" style="background:linear-gradient(90deg,#378add,transparent,#e24b4a)"></span>Hot',
-  fertility: 'Barren<span class="ramp" style="background:linear-gradient(90deg,transparent,#639922)"></span>Fertile',
-  territory: () => species.map((sp) => '<span><span class="dot" style="background:' + sp.color + '"></span>' + sp.name + '</span>').join(''),
-  none: '',
+  temperature: () => 'Cold<span class="ramp" style="background:linear-gradient(90deg,#378add,transparent,#e24b4a)"></span>Hot',
+  fertility: () => 'Barren<span class="ramp" style="background:linear-gradient(90deg,transparent,#639922)"></span>Fertile',
+  territory: territoryKey,
+  none: terrainKey,
 };
+let legendShown = '';
+
+function refreshLegend() {
+  const html = LEGENDS[map.layer]();
+  if (html === legendShown) return;
+  legendShown = html;
+  $('legend').innerHTML = html;
+}
 
 function setLayer(name) {
   map.layer = name;
   map.paintLayer();
   for (const b of $('layers').children) b.setAttribute('aria-pressed', b.dataset.layer === name);
-  const legend = LEGENDS[name];
-  $('legend').innerHTML = typeof legend === 'function' ? legend() : legend;
+  refreshLegend();
 }
 
 function setTool(name) {
@@ -179,23 +242,20 @@ function setTool(name) {
 function newWorld(seed) {
   sim.generate(seed);
   history = [];
-  events = [];
-  alive = species.map(() => true);
   debt = 0;
-  selected = null;
+  eventsShown = -1;
+  select(null);
   $('seedInput').value = sim.seed;
   // Keep the address bar shareable.
   window.history.replaceState(null, '', '?seed=' + sim.seed);
-  map.paintWater();
+  map.paintWorld();
   map.paintLayer();
   sample();
   refreshAll();
 }
 
 function sample() {
-  const counts = species.map(() => 0);
-  for (const c of sim.creatures) counts[c.species]++;
-  history.push({ tick: sim.tick, counts });
+  history.push({ tick: sim.tick, counts: sim.species.map((sp) => sp.count), traits: sim.stats() });
   const start = windowStart(sim.tick);
   while (history.length > 1 && history[1].tick <= start) history.shift();
 }
@@ -224,7 +284,16 @@ function frame() {
       refreshAll();
     }
   }
-  map.draw(speed < 1 && !paused ? debt : 1, selectedDiedAt === null ? selected : null);
+  const interp = speed < 1 && !paused ? debt : 1;
+  const alive = selectedDiedAt === null ? selected : null;
+  if (following && alive) {
+    const glide = interp < 1 && alive.prevX !== undefined && Math.abs(alive.x - alive.prevX) < 50;
+    camera.centerOn(
+      glide ? alive.prevX + (alive.x - alive.prevX) * interp : alive.x,
+      glide ? alive.prevY + (alive.y - alive.prevY) * interp : alive.y,
+    );
+  }
+  map.draw(interp, alive);
   requestAnimationFrame(frame);
 }
 
@@ -284,6 +353,7 @@ canvas.addEventListener('pointermove', (e) => {
     if (!dragged && Math.hypot(e.clientX - p.startX, e.clientY - p.startY) > 4) {
       dragged = true;
       canvas.classList.add('dragging');
+      setFollowing(false); // panning by hand takes the camera back
     }
     if (dragged) camera.panBy(pos.x - p.x, pos.y - p.y);
   }
@@ -324,12 +394,6 @@ function togglePause() {
   $('pause').textContent = paused ? 'Resume' : 'Pause';
 }
 
-function weather(boost, kind, label) {
-  sim.temperatureBoost = boost;
-  addEvent(kind, label);
-  refreshMarkers();
-}
-
 function loadSeed() {
   const seed = Number($('seedInput').value);
   if (Number.isInteger(seed) && seed > 0) newWorld(seed);
@@ -339,17 +403,23 @@ function loadSeed() {
 $('fRate').oninput = (e) => ($('fOut').textContent = (+e.target.value).toFixed(1));
 $('mut').oninput = (e) => ($('mutOut').textContent = (+e.target.value).toFixed(1));
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
-$('heat').onclick = () => weather(9, 'heat', 'Heat wave');
-$('cold').onclick = () => weather(-9, 'cold', 'Cold snap');
+$('heat').onclick = () => { sim.heatWave(); refreshAll(); };
+$('cold').onclick = () => { sim.coldSnap(); refreshAll(); };
 $('pause').onclick = togglePause;
 $('reset').onclick = () => newWorld(randomSeed());
 $('bannerNew').onclick = () => newWorld(randomSeed());
 $('seedLoad').onclick = loadSeed;
 $('seedInput').onkeydown = (e) => { if (e.key === 'Enter') loadSeed(); };
+$('metric').onchange = drawCharts;
 $('inspClear').onclick = () => select(null);
+$('inspFollow').onclick = () => {
+  setFollowing(!following);
+  // Zoom in enough to make following worthwhile.
+  if (following && camera.zoom < 2) camera.zoomAt(camera.viewW / 2, camera.viewH / 2, 2 / camera.zoom);
+};
 $('zoomIn').onclick = () => camera.zoomAt(camera.viewW / 2, camera.viewH / 2, 1.5);
 $('zoomOut').onclick = () => camera.zoomAt(camera.viewW / 2, camera.viewH / 2, 1 / 1.5);
-$('zoomFit').onclick = () => camera.fit();
+$('zoomFit').onclick = () => { setFollowing(false); camera.fit(); };
 $('handle').onclick = () => $('sidebar').classList.toggle('open');
 for (const b of $('layers').children) b.onclick = () => setLayer(b.dataset.layer);
 for (const b of document.querySelectorAll('.tool')) b.onclick = () => setTool(b.dataset.tool);
@@ -364,7 +434,7 @@ for (const tab of document.querySelectorAll('.tabs [role=tab]')) {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input[type=text]')) return;
+  if (e.target.matches('input[type=text], select')) return;
   if (e.code === 'Space') {
     e.preventDefault();
     togglePause();
@@ -376,7 +446,6 @@ new ResizeObserver(() => map.resize()).observe($('map'));
 
 map.resize();
 camera.fill();
-buildSpeciesCards();
-setLayer('temperature');
+setLayer('none');
 newWorld(sim.seed);
 frame();

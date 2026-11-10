@@ -7,13 +7,13 @@
 <style>
   :root {
     --bg: #faf9f5; --surface: #f0eee6; --panel: #f5f3ec; --land: #e6e2d3; --text: #1f1e1d;
-    --text-secondary: #5f5e5a; --text-muted: #888780; --border: #d3d1c7; --accent: #6a61d1;
+    --text-secondary: #5f5e5a; --text-muted: #888780; --border: #d3d1c7; --accent: #6a61d1; --carcass: #7a5c48;
     --overlay: rgba(250, 249, 245, 0.9);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1a1918; --surface: #2c2c2a; --panel: #222120; --land: #262523; --text: #f1efe8;
-      --text-secondary: #b4b2a9; --text-muted: #888780; --border: #444441; --accent: #9d96ea;
+      --text-secondary: #b4b2a9; --text-muted: #888780; --border: #444441; --accent: #9d96ea; --carcass: #b89a86;
       --overlay: rgba(34, 33, 32, 0.9);
     }
   }
@@ -85,7 +85,7 @@
   .handle { display: none; }
   .tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
   .tabs button {
-    flex: 1; border: 0; border-radius: 0; padding: 11px 4px 9px; font-size: 13px; color: var(--text-secondary);
+    flex: 1; border: 0; border-radius: 0; padding: 11px 2px 9px; font-size: 13px; color: var(--text-secondary);
     border-bottom: 2px solid transparent;
   }
   .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
@@ -110,7 +110,24 @@
   .meter .track i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
   #inspTitle { font-size: 17px; font-weight: 500; display: flex; align-items: center; margin-bottom: 2px; }
   #inspStatus { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; }
-  #hist { display: block; width: 100%; height: 190px; }
+  #hist { display: block; width: 100%; height: 200px; }
+  #tree { display: block; width: 100%; height: 30px; }
+  select {
+    font: inherit; color: var(--text); background: var(--bg); width: 100%; margin-bottom: 10px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+  }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .split { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  .ancestry { font-size: 13px; margin: 0; }
+  #events { list-style: none; margin: 0; padding: 0; }
+  #events li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  #events .when { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 62px; }
+  #events .pip { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--text); }
+  #events .heat .pip { background: #e24b4a; }
+  #events .cold .pip { background: #378add; }
+  #events .species .pip, #events .boom .pip { background: #4f9a3a; }
+  #events .crash .pip { background: #d08a1c; }
+  button[aria-pressed=true]#inspFollow { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent); }
   .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
 
   .field { margin-bottom: 14px; }
@@ -143,6 +160,8 @@
   .marker::before { content: ""; width: 3px; height: 100%; background: var(--text); border-radius: 1px; }
   .marker.heat::before { background: #e24b4a; }
   .marker.cold::before { background: #378add; }
+  .marker.species::before, .marker.boom::before { background: #4f9a3a; }
+  .marker.crash::before { background: #d08a1c; }
 
   /* Narrow screens: the sidebar becomes a sheet over the bottom of the map. */
   @media (max-width: 760px) {
@@ -188,10 +207,10 @@
   <section class="map" id="map">
     <canvas id="world" aria-label="World map"></canvas>
     <div class="float layers" id="layers" role="group" aria-label="Map layer">
-      <button data-layer="temperature" aria-pressed="true">Temperature</button>
+      <button data-layer="none" aria-pressed="true">Terrain</button>
+      <button data-layer="temperature" aria-pressed="false">Temperature</button>
       <button data-layer="fertility" aria-pressed="false">Fertility</button>
       <button data-layer="territory" aria-pressed="false">Territory</button>
-      <button data-layer="none" aria-pressed="false">None</button>
     </div>
     <div class="float legend" id="legend"></div>
     <div class="float zoom">
@@ -211,12 +230,14 @@
       <button role="tab" data-tab="species" aria-selected="true">Species</button>
       <button role="tab" data-tab="inspector" aria-selected="false">Inspector</button>
       <button role="tab" data-tab="charts" aria-selected="false">Charts</button>
+      <button role="tab" data-tab="events" aria-selected="false">Events</button>
       <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
     </div>
 
     <div class="panel" id="tab-species" role="tabpanel">
       <div id="cards"></div>
-      <p class="hint">Bigger body means stronger. A blue ring means thirsty.</p>
+      <p class="hint">Bigger body means stronger. A blue ring means thirsty. Crosses are carcasses, which meat-eaters feed on.</p>
+      <p class="hint" id="extinctList"></p>
     </div>
 
     <div class="panel" id="tab-inspector" role="tabpanel" hidden>
@@ -233,18 +254,41 @@
           <dt>Speed</dt><dd id="inspSpeed"></dd>
           <dt>Vision</dt><dd id="inspVision"></dd>
           <dt>Strength</dt><dd id="inspStrength"></dd>
+          <dt>Diet</dt><dd id="inspDiet"></dd>
           <dt>Prefers</dt><dd id="inspPrefers"></dd>
           <dt>Temperature here</dt><dd id="inspHere"></dd>
+          <dt>Born</dt><dd id="inspBorn"></dd>
+          <dt>Offspring</dt><dd id="inspOffspring"></dd>
         </dl>
-        <div class="buttons" style="margin-top:16px"><button id="inspClear">Clear selection</button></div>
+        <h2>Ancestry</h2>
+        <p class="ancestry" id="inspAncestry"></p>
+        <div class="buttons" style="margin-top:16px">
+          <button id="inspFollow" aria-pressed="false">Follow</button>
+          <button id="inspClear">Clear selection</button>
+        </div>
       </div>
     </div>
 
     <div class="panel" id="tab-charts" role="tabpanel" hidden>
-      <h2>Population over time</h2>
+      <h2>Species over time</h2>
+      <select id="metric" aria-label="What to chart">
+        <option value="count">Population</option>
+        <option value="speed">Average speed</option>
+        <option value="vision">Average vision</option>
+        <option value="strength">Average strength</option>
+        <option value="preferredTemp">Average preferred temperature</option>
+        <option value="diet">Average share of meat in diet</option>
+      </select>
       <canvas id="hist"></canvas>
       <div class="key" id="chartKey"></div>
-      <p class="hint" style="margin-top:14px">The strip in the bottom bar shows each species' share over the same period, with marks for heat waves, cold snaps and extinctions.</p>
+      <h2>Family tree</h2>
+      <p class="hint">From the start of this world to now. Each species branches from the one it split from.</p>
+      <canvas id="tree"></canvas>
+    </div>
+
+    <div class="panel" id="tab-events" role="tabpanel" hidden>
+      <p class="hint" id="eventsEmpty">Nothing has happened yet. New species, extinctions, booms, crashes and weather will be listed here and marked on the timeline.</p>
+      <ul id="events"></ul>
     </div>
 
     <div class="panel" id="tab-settings" role="tabpanel" hidden>

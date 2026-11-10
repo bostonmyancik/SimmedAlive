@@ -1,4 +1,4 @@
-// The map: its size, lakes, distance-to-water, and temperature.
+// The map: its size, lakes, terrain, distance-to-water, and temperature.
 // The map is a grid of cells. It wraps around east-west but not north-south.
 
 import { RULES } from './params.js';
@@ -44,8 +44,61 @@ export function generateLakes(water, random) {
   }
 }
 
-// Fills `distance` with each cell's step count to the nearest water cell.
-export function computeWaterDistance(water, distance) {
+// Kinds of land. Water is tracked separately.
+export const PLAIN = 0, FERTILE = 1, DESERT = 2, MOUNTAIN = 3;
+
+const smooth = (t) => t * t * (3 - 2 * t);
+
+// Smooth random noise over the map. Returns f(u, v) in [0, 1] for u, v in
+// [0, 1], which wraps around in u (east-west) like the map does.
+function makeNoise(random, cols, rows) {
+  const lattice = new Float32Array(cols * (rows + 1));
+  for (let i = 0; i < lattice.length; i++) lattice[i] = random();
+  return (u, v) => {
+    const fx = u * cols, fy = v * rows;
+    const x0 = Math.floor(fx) % cols, y0 = Math.min(rows - 1, Math.floor(fy));
+    const x1 = (x0 + 1) % cols, y1 = y0 + 1;
+    const tx = smooth(fx - Math.floor(fx)), ty = smooth(fy - y0);
+    const top = lattice[y0 * cols + x0] * (1 - tx) + lattice[y0 * cols + x1] * tx;
+    const bottom = lattice[y1 * cols + x0] * (1 - tx) + lattice[y1 * cols + x1] * tx;
+    return top * (1 - ty) + bottom * ty;
+  };
+}
+
+// Raises mountain ranges on dry land. Everything else starts as plain.
+export function generateMountains(terrain, water, random) {
+  const broad = makeNoise(random, 6, 3), detail = makeNoise(random, 17, 8), gaps = makeNoise(random, 11, 5);
+  for (let gy = 0; gy < GRID_H; gy++) {
+    for (let gx = 0; gx < GRID_W; gx++) {
+      const u = (gx + 0.5) / GRID_W, v = (gy + 0.5) / GRID_H;
+      // Ranges follow the contour where the height noise crosses its midpoint,
+      // and the `gaps` noise breaks them up so they have passes.
+      const height = 0.7 * broad(u, v) + 0.3 * detail(u, v);
+      const onRidge = Math.abs(height - 0.5) < 0.022;
+      const i = gy * GRID_W + gx;
+      terrain[i] = !water[i] && onRidge && gaps(u, v) > 0.42 ? MOUNTAIN : PLAIN;
+    }
+  }
+}
+
+// Turns plain land fertile (wet or by the shore) or into desert (dry and far from water).
+export function classifyLand(terrain, water, waterDistance, random) {
+  const broad = makeNoise(random, 7, 3), detail = makeNoise(random, 19, 9);
+  for (let gy = 0; gy < GRID_H; gy++) {
+    for (let gx = 0; gx < GRID_W; gx++) {
+      const i = gy * GRID_W + gx;
+      if (water[i] || terrain[i] === MOUNTAIN) continue;
+      const u = (gx + 0.5) / GRID_W, v = (gy + 0.5) / GRID_H;
+      const moisture = 0.7 * broad(u, v) + 0.3 * detail(u, v);
+      if (waterDistance[i] <= 2 || moisture > 0.6) terrain[i] = FERTILE;
+      else if (moisture < 0.42 && waterDistance[i] > 5) terrain[i] = DESERT;
+    }
+  }
+}
+
+// Fills `distance` with each cell's walking distance (in cells) to the nearest
+// water. Mountains cannot be crossed; they and anywhere cut off stay at 1e9.
+export function computeWaterDistance(water, terrain, distance) {
   distance.fill(1e9);
   const queue = [];
   for (let i = 0; i < water.length; i++) {
@@ -61,6 +114,7 @@ export function computeWaterDistance(water, distance) {
       const nx = (gx + ax + GRID_W) % GRID_W, ny = gy + ay;
       if (ny < 0 || ny >= GRID_H) continue;
       const j = ny * GRID_W + nx;
+      if (terrain[j] === MOUNTAIN) continue;
       if (distance[j] > distance[i] + 1) {
         distance[j] = distance[i] + 1;
         queue.push(j);

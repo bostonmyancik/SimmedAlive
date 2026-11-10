@@ -1,15 +1,30 @@
-// Draws the world onto the map canvas: land, the chosen layer, water, food and creatures.
+// Draws the world onto the map canvas: terrain, the chosen layer, water,
+// plants, carcasses and creatures.
 
-import { GRID_W, GRID_H, WIDTH, HEIGHT } from '../sim/world.js';
+import { GRID_W, GRID_H, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN } from '../sim/world.js';
 import { RULES } from '../sim/params.js';
 
 // Territory is counted on a coarser grid so neighbours blend into regions.
 const TERRITORY_W = GRID_W / 4;
 const TERRITORY_H = GRID_H / 4;
 
+// Land colours for the light and dark themes.
+export const TERRAIN_COLORS = {
+  light: { [PLAIN]: '#e6e2d3', [FERTILE]: '#cddbab', [DESERT]: '#ecd9a4', [MOUNTAIN]: '#8d8980' },
+  dark: { [PLAIN]: '#262523', [FERTILE]: '#27331f', [DESERT]: '#3d3421', [MOUNTAIN]: '#63605a' },
+};
+const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+export const terrainColors = () => (darkQuery.matches ? TERRAIN_COLORS.dark : TERRAIN_COLORS.light);
+
+const rgbCache = new Map();
 function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  let rgb = rgbCache.get(hex);
+  if (!rgb) {
+    const n = parseInt(hex.slice(1), 16);
+    rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    rgbCache.set(hex, rgb);
+  }
+  return rgb;
 }
 
 function offscreen(w, h) {
@@ -21,16 +36,16 @@ function offscreen(w, h) {
 
 export function createMapView(canvas, sim, camera) {
   const ctx = canvas.getContext('2d');
+  const land = offscreen(GRID_W, GRID_H);
   const water = offscreen(GRID_W, GRID_H);
   const overlay = offscreen(GRID_W, GRID_H);
   const territory = offscreen(TERRITORY_W, TERRITORY_H);
-  const speciesRgb = sim.species.map((s) => hexToRgb(s.color));
   let dpr = 1;
 
   const view = {
     layer: 'temperature', // 'temperature' | 'fertility' | 'territory' | 'none'
     resize,
-    paintWater,
+    paintWorld,
     paintLayer,
     draw,
   };
@@ -47,20 +62,28 @@ export function createMapView(canvas, sim, camera) {
     camera.resize(w, h);
   }
 
-  // Call once per new world.
-  function paintWater() {
-    const data = water.image.data;
-    data.fill(0);
+  // Paints the terrain and water. Call once per new world (and on a theme change).
+  function paintWorld() {
+    const colors = terrainColors();
+    const landData = land.image.data, waterData = water.image.data;
+    waterData.fill(0);
     for (let i = 0; i < GRID_W * GRID_H; i++) {
+      const [r, g, b] = hexToRgb(colors[sim.terrain[i]]);
+      landData[i * 4] = r;
+      landData[i * 4 + 1] = g;
+      landData[i * 4 + 2] = b;
+      landData[i * 4 + 3] = 255;
       if (sim.water[i]) {
-        data[i * 4] = 24;
-        data[i * 4 + 1] = 95;
-        data[i * 4 + 2] = 165;
-        data[i * 4 + 3] = 225;
+        waterData[i * 4] = 24;
+        waterData[i * 4 + 1] = 95;
+        waterData[i * 4 + 2] = 165;
+        waterData[i * 4 + 3] = 225;
       }
     }
+    land.ctx.putImageData(land.image, 0, 0);
     water.ctx.putImageData(water.image, 0, 0);
   }
+  darkQuery.addEventListener('change', paintWorld);
 
   function paintTemperature() {
     const data = overlay.image.data;
@@ -81,7 +104,7 @@ export function createMapView(canvas, sim, camera) {
       data[i * 4] = 99;
       data[i * 4 + 1] = 153;
       data[i * 4 + 2] = 34;
-      data[i * 4 + 3] = sim.water[i] ? 0 : sim.fertility(i) * 150;
+      data[i * 4 + 3] = sim.fertility(i) * 170;
     }
     overlay.ctx.putImageData(overlay.image, 0, 0);
   }
@@ -104,7 +127,7 @@ export function createMapView(canvas, sim, camera) {
           top = s;
         }
       }
-      const [r, g, b] = speciesRgb[top];
+      const [r, g, b] = hexToRgb(sim.species[top].color);
       data[i * 4] = r;
       data[i * 4 + 1] = g;
       data[i * 4 + 2] = b;
@@ -122,12 +145,12 @@ export function createMapView(canvas, sim, camera) {
 
   // Draws one copy of the world. `minX` and `maxX` are the visible world x range.
   function drawWorld(minX, maxX, interp, selected) {
-    ctx.fillStyle = css('--land');
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.drawImage(land.canvas, 0, 0, WIDTH, HEIGHT);
     if (view.layer === 'territory') ctx.drawImage(territory.canvas, 0, 0, WIDTH, HEIGHT);
     else if (view.layer !== 'none') ctx.drawImage(overlay.canvas, 0, 0, WIDTH, HEIGHT);
     ctx.drawImage(water.canvas, 0, 0, WIDTH, HEIGHT);
 
+    // Plants are green dots.
     ctx.fillStyle = '#639922';
     ctx.beginPath();
     for (const f of sim.food) {
@@ -136,6 +159,19 @@ export function createMapView(canvas, sim, camera) {
       ctx.arc(f.x, f.y, 1.8, 0, 6.29);
     }
     ctx.fill();
+
+    // Carcasses are small crosses.
+    ctx.strokeStyle = css('--carcass');
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (const k of sim.carcasses) {
+      if (k.x < minX || k.x > maxX) continue;
+      ctx.moveTo(k.x - 2.5, k.y - 2.5);
+      ctx.lineTo(k.x + 2.5, k.y + 2.5);
+      ctx.moveTo(k.x + 2.5, k.y - 2.5);
+      ctx.lineTo(k.x - 2.5, k.y + 2.5);
+    }
+    ctx.stroke();
 
     for (const c of sim.creatures) {
       let x = c.x, y = c.y;

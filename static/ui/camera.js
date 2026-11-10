@@ -40,6 +40,13 @@ export function createCamera(worldW, worldH) {
       constrain();
     },
 
+    // Centre the view on a world point (used to follow a creature).
+    centerOn(x, y) {
+      cam.x = x;
+      cam.y = y;
+      constrain();
+    },
+
     // World x of the left edge of the view (may be negative or past worldW).
     left() {
       return cam.x - cam.viewW / cam.zoom / 2;

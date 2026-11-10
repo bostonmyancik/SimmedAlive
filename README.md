@@ -1,6 +1,6 @@
 # Life sim
 
-Three evolving species competing for food, water, and territory on a map with drifting weather.
+Evolving species competing for food, water, and territory on a map with terrain and drifting weather. Lineages that drift far enough split into new species, and a food web forms between plant-eaters, meat-eaters and scavengers.
 
 ## Run it
 
@@ -25,9 +25,10 @@ source .venv/bin/activate && python3 app.py
 
 - **Map**: drag to pan (the world wraps around east-west), scroll or pinch to zoom, or use the + / − / Fit buttons.
 - **Tools** (left rail): Select (key `1`) inspects the creature you click; Food (key `2`) drops food where you click.
-- **Layers** (top of the map): temperature, fertility (how readily food grows), territory (which species dominates each area), or none.
-- **Sidebar tabs**: Species, Inspector, Charts and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
-- **Bottom bar**: pause (or Space), speed, the tick, year and season, and a timeline with marks for heat waves, cold snaps and extinctions.
+- **Layers** (top of the map): terrain (fertile land, plain, desert, mountains), temperature, fertility (how readily food grows), or territory (which species dominates each area).
+- **On the map**: green dots are plants, crosses are carcasses, a blue ring means thirsty, and a bigger body means stronger. Mountains and water block movement.
+- **Sidebar tabs**: Species (every living species), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
+- **Bottom bar**: pause (or Space), speed, the tick, year and season, and a timeline with marks for new species, extinctions, booms, crashes, heat waves and cold snaps.
 - **Settings**: food supply, mutation rate, heat wave, cold snap, and the world seed. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared.
 
 ## Where things live
@@ -38,12 +39,13 @@ source .venv/bin/activate && python3 app.py
   - `main.js`: animation loop, tools, panels and bottom bar. Start reading here.
   - `camera.js`: zoom and pan.
   - `mapview.js`: draws the world and the map layers.
-  - `charts.js`: the population chart and the timeline strip.
+  - `charts.js`: the line chart, the family tree and the timeline strip.
 - `static/sim/`: the simulation. No page code, so it also runs under Node.
   - `params.js`: every tuning value (species traits, balance settings, fixed rules).
   - `sim.js`: world generation and the per-tick rules. Start reading here.
-  - `world.js`: map size, lakes, distance to water, temperature.
+  - `world.js`: map size, lakes, terrain, distance to water, temperature.
   - `creatures.js`: starting creatures and mutated offspring.
+  - `species.js`: trait distance between creatures and species, and names and colours for new species.
   - `grid.js`: fast "nearest thing" lookups.
   - `rng.js`: seeded random numbers.
 - `tests/`: Node tests for the simulation.
@@ -56,11 +58,18 @@ Needs Node 20 or newer; there is nothing to install.
 npm test
 ```
 
+## How the world works
+
+- **Terrain.** Plants grow best on fertile land near water, poorly in desert, and not at all on mountains. Mountains and water cannot be crossed.
+- **Diet.** Every creature has a `diet` from 0 (plants only) to 1 (meat only). A plant is worth less the more meat is in the diet, and a carcass is worth more. Every death leaves a carcass that rots after a while. Meat-eaters bite harder and hunt weaker species when hungry.
+- **Speciation.** Traits mutate at each birth. A newborn that has drifted too far from its species' founder joins a closely related species it resembles, or founds a new one. A species and the one it split from do not fight; all other species do. A new species is announced once it has 10 members.
+- **Events.** The sim logs new species, extinctions, booms and crashes (a population doubling or halving between checks), heat waves and cold snaps.
+
 ## Tuning
 
 All values are in `static/sim/params.js`.
 
-Species starting traits are the `SPECIES` array (`speed`, `vision`, `strength`, `preferredTemp`).
+The founding species are the `SPECIES` array (`speed`, `vision`, `strength`, `preferredTemp`, `diet`).
 
 The balance settings are `DEFAULT_PARAMS`:
 
@@ -73,11 +82,13 @@ The balance settings are `DEFAULT_PARAMS`:
 | `foodGrowth` | Food growth multiplier |
 | `combatDamage` | Combat damage per tick per point of strength |
 | `awayDamageFactor` | Damage multiplier when fighting outside your climate |
-| `huntEnergy` | Energy below which a creature will hunt weaker species |
+| `huntEnergy` | Energy below which a half-meat-eater hunts weaker species (scales with diet) |
+| `dietDamageBonus` | Extra combat damage for meat-eaters |
 | `fleeDistance` | Distance at which a creature flees a much stronger one |
 | `strengthUpkeep` | Energy upkeep cost of strength |
 | `stressCost` | Energy cost per degree of temperature stress |
 | `maxBreedingStress` | Max stress at which a creature can still reproduce |
 | `tempMutationScale` | How fast preferred temperature mutates |
+| `speciationDistance` | How far traits must drift from a species' founder before a lineage splits off |
 
-Less commonly changed rules (energy from food, population cap, lifespan, trait limits) are in `RULES` in the same file.
+Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species) are in `RULES` in the same file.
