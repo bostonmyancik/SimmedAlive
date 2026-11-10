@@ -105,7 +105,7 @@ function refresh() {
     (data.tick < data.latestTick ? ' (viewing the past; now is ' + fmt(data.latestTick) + ')' : '');
   $('key').innerHTML = data.living.map((sp) => '<span>' + dot(sp.color) + sp.name + ' · ' + fmt(sp.count) + '</span>').join('');
   for (const chart of charts) drawLineChart(chart.canvas, data.history, data.shown, data.latestTick, chart.metric, true);
-  drawFamilyTree($('tree'), data.shown, data.species, data.tick);
+  drawFamilyTree($('tree'), data.tree, data.species, data.tick);
   placeCrosshairs();
 }
 

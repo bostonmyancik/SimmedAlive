@@ -35,6 +35,11 @@ def create_app(db_path=None):
         body = json.dumps(summary)[:-1] + ', "data": ' + data_text + "}"
         return Response(body, mimetype="application/json")
 
+    @app.errorhandler(413)
+    def too_large(_error):
+        megabytes = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+        return error(f"This world is too large to save (the limit is {megabytes} MB).", 413)
+
     @app.route("/")
     def index():
         return render_template("index.html")

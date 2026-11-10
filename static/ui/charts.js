@@ -3,7 +3,10 @@
 //
 // The line chart and timeline show the same window: the most recent
 // WINDOW_TICKS ticks, or the whole run so far while it is shorter than that.
-// `history` is a list of samples: { tick, counts: [per species id], traits: [per species id] }.
+// `history` is a list of samples: { tick, counts: { id: head count }, traits: { id: averages } }.
+// A sample lists only the species alive at that tick. That keeps its size the
+// same however many species have come and gone, which matters because the
+// history is saved with the world.
 
 export const SAMPLE_EVERY = 40;    // ticks between samples
 export const WINDOW_TICKS = 16000; // how far back the charts look
@@ -37,6 +40,47 @@ export function windowStart(tick) {
 // Number of ticks the charts span, given the current tick.
 export function windowSpan(tick) {
   return Math.min(WINDOW_TICKS, Math.max(MIN_SPAN, tick));
+}
+
+// One sample of the chart history: the species alive now, and their average traits.
+export function makeSample(tick, species, stats) {
+  const counts = {}, traits = {};
+  for (const sp of species) {
+    if (!sp.count) continue;
+    counts[sp.id] = sp.count;
+    traits[sp.id] = stats[sp.id];
+  }
+  return { tick, counts, traits };
+}
+
+// Brings a saved history up to date. Older saves listed every species that
+// had ever existed in every sample, which grew without limit.
+export function compactHistory(history) {
+  return history.map((sample) => {
+    if (!Array.isArray(sample.counts)) return sample;
+    const counts = {}, traits = {};
+    sample.counts.forEach((count, id) => {
+      if (!count) return;
+      counts[id] = count;
+      traits[id] = sample.traits[id];
+    });
+    return { tick: sample.tick, counts, traits };
+  });
+}
+
+// The species that appear anywhere in the history, so charts need not loop
+// over every species that has ever existed.
+export function speciesInHistory(history, species) {
+  const seen = new Set();
+  for (const sample of history) for (const id in sample.counts) seen.add(+id);
+  return species.filter((sp) => seen.has(sp.id));
+}
+
+// The species the family tree shows: those alive, and those lost within the
+// time the charts cover.
+export function familyTreeSpecies(species, tick) {
+  const start = windowStart(tick);
+  return species.filter((sp) => sp.count > 0 || (sp.extinctTick !== null && sp.extinctTick >= start));
 }
 
 const whole = (n) => Math.round(n).toLocaleString('en-US');
@@ -157,7 +201,7 @@ export function drawTimeline(canvas, history, species, tick) {
   ctx.fillRect(0, 0, w, bandsHeight);
 
   if (history.length >= 2) {
-    const totals = history.map((s) => s.counts.reduce((a, b) => a + b, 0) || 1);
+    const totals = history.map((s) => Object.values(s.counts).reduce((a, b) => a + b, 0) || 1);
     let lower = history.map(() => 0);
     for (const sp of species) {
       const upper = history.map((s, i) => lower[i] + (s.counts[sp.id] || 0) / totals[i]);
@@ -192,9 +236,12 @@ export function drawTimeline(canvas, history, species, tick) {
 }
 
 // The family tree: one row per species, running from the tick it appeared to
-// the tick it died out (or now), joined to the species it split from.
-// `species` should hold only the species worth showing; a species whose parent
-// is not among them hangs off its nearest ancestor that is.
+// the tick it died out (or now), joined to the species it split from. It
+// covers the same stretch of time as the other charts; a species older than
+// that starts at the left edge.
+// `species` should hold only the species worth showing (see familyTreeSpecies);
+// a species whose parent is not among them hangs off its nearest ancestor
+// that is, or stands alone.
 export function drawFamilyTree(canvas, species, allSpecies, tick) {
   const shown = new Set(species.map((sp) => sp.id));
   const parentOf = (sp) => {
@@ -222,7 +269,8 @@ export function drawFamilyTree(canvas, species, allSpecies, tick) {
   if (!p) return;
   const { ctx, w } = p;
   const left = 4, right = w - 10;
-  const xOf = (t) => left + (tick ? t / tick : 0) * (right - left);
+  const start = windowStart(tick);
+  const xOf = (t) => left + (tick > start ? Math.max(0, t - start) / (tick - start) : 0) * (right - left);
   const yOf = (id) => rowOf.get(id) * TREE_ROW + 19;
   const textColor = css('--text-secondary'), mutedColor = css('--text-muted');
   ctx.font = '11px system-ui, sans-serif';
