@@ -146,6 +146,7 @@ function refreshSpecies() {
     card.facts.innerHTML =
       (sp.parent !== null ? '<dt>Split from</dt><dd>' + sim.species[sp.parent].name + '</dd>' : '') +
       '<dt>Diet</dt><dd>' + dietWords(st.diet) + '</dd>' +
+      '<dt>Can swim</dt><dd>' + Math.round(st.swimmers * 100) + '%</dd>' +
       '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
       '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
       '<dt>Vision</dt><dd>' + Math.round(st.vision) + '</dd>' +
@@ -193,6 +194,7 @@ function refreshInspector() {
   $('inspVision').textContent = c.vision.toFixed(0);
   $('inspStrength').textContent = c.strength.toFixed(2);
   $('inspDiet').textContent = dietWords(c.diet);
+  $('inspSwims').textContent = c.swimmer ? 'Yes' : 'No';
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
   $('inspBorn').textContent = c.bornTick ? 'Tick ' + fmt(c.bornTick) : 'At the start';
@@ -247,6 +249,7 @@ const METRICS = {
   strength: traitMetric('strength', (v) => v.toFixed(2)),
   preferredTemp: { ...traitMetric('preferredTemp', (v) => v.toFixed(1) + '°C'), floor: -Infinity },
   diet: traitMetric('diet', (v) => Math.round(v * 100) + '% meat'),
+  swimmers: traitMetric('swimmers', (v) => Math.round(v * 100) + '% can swim'),
 };
 
 function drawCharts() {
@@ -283,7 +286,17 @@ function refreshMarkers() {
   $('future').style.right = (100 - timelinePercent(latestTick)) + '%';
 }
 
+// The swimmer share lives in the world's settings, so a loaded or rewound
+// world brings its own value back to the slider.
+function refreshSwimSlider() {
+  if (document.activeElement === $('swimShare')) return;
+  const percent = Math.round(sim.params.swimmerShare * 100);
+  $('swimShare').value = percent;
+  $('swimOut').textContent = percent + '%';
+}
+
 function refreshAll() {
+  refreshSwimSlider();
   refreshSpecies();
   refreshInspector();
   refreshEvents();
@@ -826,6 +839,11 @@ function loadSeed() {
 
 $('fRate').oninput = (e) => ($('fOut').textContent = (+e.target.value).toFixed(1));
 $('mut').oninput = (e) => ($('mutOut').textContent = (+e.target.value).toFixed(1));
+$('swimShare').oninput = (e) => {
+  sim.params.swimmerShare = +e.target.value / 100;
+  $('swimOut').textContent = e.target.value + '%';
+  worldEdited = true;
+};
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
 const disaster = (strike) => () => { branchHere(); strike(); worldWasEdited(); refreshAll(); };
 $('toNow').onclick = () => goTo(latestTick, true);
