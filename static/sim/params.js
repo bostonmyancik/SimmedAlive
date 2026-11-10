@@ -43,6 +43,11 @@ export const DEFAULT_PARAMS = {
 
   // Speciation
   speciationDistance: 1.6, // how far traits must drift from a species' founder to split off
+
+  // Bases
+  basePopulation: 120,     // members a species needs for each base it holds
+  maxBases: 3,             // most bases one species can hold
+  farmChance: 0.01,        // chance per check (every baseCheckEvery ticks) that a grown base takes up farming
 };
 
 // Fixed rules of the world. These are not exposed as tuning knobs yet.
@@ -106,6 +111,34 @@ export const RULES = {
   traitScales: { speed: 1, vision: 25, strength: 1, preferredTemp: 8, diet: 0.35 },
   maxLivingSpecies: 12,        // no new species appear while this many are alive
   establishedAt: 10,           // members a new species needs before it is announced
+
+  // Bases. A species that is numerous enough builds a camp where its members
+  // gather. A camp that survives grows into a fort and, after a year, a castle.
+  // Pairs are [when new, when a year old].
+  baseCheckEvery: 100,         // ticks between checks for building a base or taking up farming
+  baseSpacing: 150,            // closest two bases can stand, in pixels
+  baseMinNeighbours: 6,        // members that must live around the spot...
+  baseNeighbourRange: 50,      // ...within this many pixels
+  baseRadius: 30,              // creatures this close to their own base can shelter in it
+  baseShelter: [6, 30],        // creatures a base can shelter
+  baseStore: [20, 80],         // meals a base can store
+  baseHealth: [150, 450],      // damage a base can take
+  baseRepair: 0.05,            // health regained per tick while nobody is attacking
+  baseRepairDelay: 200,        // ticks after a hit before repairs start
+  baseReachSq: 144,            // an attacker must be this close to the middle to damage a base
+  baseDefense: 0.5,            // damage multiplier for a creature sheltering in its base
+  baseWarmth: 10,              // degrees of cold a sheltering creature is spared
+  baseGuardRange: 45,          // an enemy this close to a base is charged by its residents
+  baseAbandonAfter: 3000,      // ticks with nobody sheltering before a base is abandoned
+  haulRange: 220,              // creatures this close to a base treat it as home
+  carryAboveEnergy: 80,        // a creature this well fed carries food home instead of eating it
+  carryEatBelow: 40,           // ...but eats what it is carrying if it gets this hungry
+  storeEatBelow: 50,           // a creature this hungry eats from its base's store
+  raidBelowEnergy: 50,         // a creature this hungry goes for an enemy base's store
+  farmFromGrowth: 1 / 3,       // how grown (0 to 1) a base must be before it can farm
+  farmEvery: 8,                // ticks between a farm's attempts to raise a plant
+  farmRadius: 55,              // how far from the base its fields reach
+  farmBaseChance: 0.35,        // chance a farmed plant takes, on top of the land's own fertility
 
   // World tools and disasters
   tempOffsetLimit: 20,         // most a brush can warm or cool a spot, in degrees

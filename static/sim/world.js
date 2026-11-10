@@ -124,7 +124,7 @@ export function computeWaterDistance(water, terrain, distance) {
 }
 
 const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
-const YEAR_TICKS = 2 * Math.PI * RULES.seasonLength;
+export const YEAR_TICKS = 2 * Math.PI * RULES.seasonLength;
 
 // The year (starting at 1) and season name for a tick. Summer is the warm peak.
 export function seasonAt(tick) {
