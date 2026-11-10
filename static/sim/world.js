@@ -134,8 +134,9 @@ export function seasonAt(tick) {
 }
 
 // Recomputes the temperature of every cell: a north-south gradient, the
-// season, any heat wave or cold snap (`boost`), and the weather fronts.
-export function updateTemperature(temperature, fronts, tick, boost, params) {
+// season, any heat wave or cold snap (`boost`), the weather fronts, and
+// `offset`, the per-cell warming or cooling left by brushes and meteors.
+export function updateTemperature(temperature, fronts, tick, boost, params, offset) {
   const season = params.seasonSwing * Math.sin(tick / RULES.seasonLength) + boost;
   for (let gy = 0; gy < GRID_H; gy++) {
     for (let gx = 0; gx < GRID_W; gx++) {
@@ -145,7 +146,7 @@ export function updateTemperature(temperature, fronts, tick, boost, params) {
         const dx = wrapDistance(x - front.x, WIDTH), dy = wrapDistance(y - front.y, HEIGHT);
         t += front.strength * Math.exp(-(dx * dx + dy * dy) / RULES.frontRadiusSq);
       }
-      temperature[gy * GRID_W + gx] = t;
+      temperature[gy * GRID_W + gx] = t + offset[gy * GRID_W + gx];
     }
   }
 }

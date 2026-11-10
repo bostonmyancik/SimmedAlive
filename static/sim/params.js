@@ -88,6 +88,16 @@ export const RULES = {
   maxLivingSpecies: 12,        // no new species appear while this many are alive
   establishedAt: 10,           // members a new species needs before it is announced
 
+  // World tools and disasters
+  tempOffsetLimit: 20,         // most a brush can warm or cool a spot, in degrees
+  tempOffsetDecay: 0.995,      // brushed temperature fades by this every 10 ticks
+  droughtLength: 2500,         // ticks a drought lasts
+  droughtFoodFactor: 0.3,      // plant growth during a drought
+  droughtThirstFactor: 1.5,    // thirst during a drought
+  plagueDeathRate: 0.6,        // share of the largest species a plague kills
+  meteorRadius: 90,            // everything within this many pixels dies
+  meteorHeat: 15,              // degrees of local warming at the impact
+
   // Event log
   trendCheckEvery: 1500,       // ticks between boom and crash checks
   trendFactor: 2,              // population must double (or halve) between checks...

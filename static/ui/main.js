@@ -23,8 +23,20 @@ const canvas = $('world');
 const camera = createCamera(WIDTH, HEIGHT);
 const map = createMapView(canvas, sim, camera);
 
+const SAVE_KEY = 'lifesim.save.v1';
+const BRUSH_TOOLS = ['food', 'terrain', 'warm', 'cool']; // drag to paint with these
+const TOOL_TIPS = {
+  food: 'Drag to scatter plants.',
+  terrain: 'Drag to paint. Water and mountains block movement.',
+  warm: 'Drag to warm the land. It fades over time.',
+  cool: 'Drag to cool the land. It fades over time.',
+  meteor: 'Click the map to strike. Everything inside the circle dies.',
+};
+
 let paused = false;
-let tool = 'select';       // 'select' | 'food'
+let tool = 'select';       // 'select' | 'food' | 'terrain' | 'warm' | 'cool' | 'meteor'
+let brushKind = 'water';   // what the terrain brush paints
+let hover = null;          // pointer position over the map, in view pixels
 let selected = null;       // the creature shown in the Inspector
 let selectedDiedAt = null; // tick at which it died, if it has
 let following = false;     // keep the camera on the selected creature
@@ -174,7 +186,8 @@ function drawCharts() {
 
 function refreshClock() {
   const { year, season } = seasonAt(sim.tick);
-  $('clock').textContent = 'Tick ' + fmt(sim.tick) + ' · Year ' + year + ' · ' + season;
+  $('clock').textContent = 'Tick ' + fmt(sim.tick) + ' · Year ' + year + ' · ' + season
+    + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
 }
 
 function refreshMarkers() {
@@ -234,13 +247,36 @@ function setLayer(name) {
 function setTool(name) {
   tool = name;
   for (const b of document.querySelectorAll('.tool')) b.setAttribute('aria-pressed', b.dataset.tool === name);
-  canvas.classList.toggle('food', name === 'food');
+  canvas.classList.toggle('brush', name !== 'select');
+  $('toolopts').hidden = !(name in TOOL_TIPS);
+  $('kinds').hidden = name !== 'terrain';
+  $('sizeRow').hidden = !BRUSH_TOOLS.includes(name);
+  $('toolTip').textContent = TOOL_TIPS[name] || '';
+  // Show the layer the tool changes.
+  if (name === 'terrain') setLayer('none');
+  if (name === 'warm' || name === 'cool') setLayer('temperature');
+}
+
+function brushRadius() {
+  return tool === 'meteor' ? RULES.meteorRadius : +$('brushSize').value;
+}
+
+// The circle to outline under the pointer, in world pixels.
+function brushOutline() {
+  if (!hover || tool === 'select') return null;
+  const at = camera.toWorld(hover.x, hover.y);
+  return { x: at.x, y: at.y, radius: brushRadius() };
 }
 
 // ---------- World ----------
 
 function newWorld(seed) {
   sim.generate(seed);
+  showWorld();
+}
+
+// Points the page at whatever world the sim now holds (new or loaded).
+function showWorld() {
   history = [];
   debt = 0;
   eventsShown = -1;
@@ -293,17 +329,30 @@ function frame() {
       glide ? alive.prevY + (alive.y - alive.prevY) * interp : alive.y,
     );
   }
-  map.draw(interp, alive);
+  map.draw(interp, alive, brushOutline());
   requestAnimationFrame(frame);
 }
 
 // ---------- Tools ----------
 
-function dropFood(at) {
-  for (let i = 0; i < 30; i++) {
-    const x = (at.x + (Math.random() - 0.5) * 60 + WIDTH) % WIDTH;
-    const y = Math.min(HEIGHT - 1, Math.max(0, at.y + (Math.random() - 0.5) * 60));
-    sim.addFood(x, y);
+// One dab of the current brush at a point in the view.
+function paint(sx, sy) {
+  const at = camera.toWorld(sx, sy);
+  if (at.y < 0 || at.y >= HEIGHT) return;
+  const radius = brushRadius();
+  if (tool === 'food') {
+    for (let i = 0; i < 4; i++) {
+      const angle = Math.random() * 6.283, distance = Math.sqrt(Math.random()) * radius;
+      sim.addFood((at.x + Math.cos(angle) * distance + WIDTH) % WIDTH,
+        Math.min(HEIGHT - 1, Math.max(0, at.y + Math.sin(angle) * distance)));
+    }
+  } else if (tool === 'terrain') {
+    sim.paintTerrain(at.x, at.y, radius, brushKind);
+    map.paintWorld();
+    map.paintLayer();
+  } else {
+    sim.paintTemperature(at.x, at.y, radius, tool === 'warm' ? 0.8 : -0.8);
+    map.paintLayer();
   }
 }
 
@@ -324,14 +373,24 @@ function creatureNear(at) {
 function clickMap(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
-  if (tool === 'food') dropFood(at);
-  else select(creatureNear(at));
+  if (tool === 'meteor') {
+    sim.meteor(at.x, at.y);
+    map.paintWorld();
+    map.paintLayer();
+    refreshAll();
+  } else if (tool === 'select') {
+    select(creatureNear(at));
+  }
 }
 
-// Drag to pan, pinch or scroll to zoom, click to use the current tool.
+// Drag to pan (or to paint, with a brush tool), pinch or scroll to zoom, click
+// to use the current tool. With a brush, drag with the right or middle button
+// (or two fingers) to pan.
 const pointers = new Map();
 let dragged = false;
+let painting = false;
 let pinchDist = 0;
+let pinchMid = null;
 
 function pointerPos(e) {
   const rect = canvas.getBoundingClientRect();
@@ -341,15 +400,27 @@ function pointerPos(e) {
 canvas.addEventListener('pointerdown', (e) => {
   try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
   pointers.set(e.pointerId, { ...pointerPos(e), startX: e.clientX, startY: e.clientY });
-  if (pointers.size === 1) dragged = false;
+  if (pointers.size === 1) {
+    dragged = false;
+    painting = e.button === 0 && BRUSH_TOOLS.includes(tool);
+    if (painting) paint(pointerPos(e).x, pointerPos(e).y);
+  } else {
+    painting = false;
+  }
   pinchDist = 0;
+  pinchMid = null;
 });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('pointerleave', () => { hover = null; });
 
 canvas.addEventListener('pointermove', (e) => {
   const p = pointers.get(e.pointerId);
-  if (!p) return;
   const pos = pointerPos(e);
-  if (pointers.size === 1) {
+  hover = pos;
+  if (!p) return;
+  if (painting) {
+    paint(pos.x, pos.y);
+  } else if (pointers.size === 1) {
     if (!dragged && Math.hypot(e.clientX - p.startX, e.clientY - p.startY) > 4) {
       dragged = true;
       canvas.classList.add('dragging');
@@ -363,8 +434,11 @@ canvas.addEventListener('pointermove', (e) => {
     dragged = true;
     const [a, b] = [...pointers.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinchDist) camera.zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, dist / pinchDist);
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (pinchDist) camera.zoomAt(mid.x, mid.y, dist / pinchDist);
+    if (pinchMid) camera.panBy(mid.x - pinchMid.x, mid.y - pinchMid.y);
     pinchDist = dist;
+    pinchMid = mid;
   }
 });
 
@@ -373,9 +447,12 @@ function pointerEnd(e) {
   if (!p) return;
   pointers.delete(e.pointerId);
   pinchDist = 0;
+  pinchMid = null;
   if (pointers.size === 0) {
     canvas.classList.remove('dragging');
-    if (!dragged && e.type === 'pointerup') clickMap(p.x, p.y);
+    if (painting) refreshAll();
+    else if (!dragged && e.type === 'pointerup' && e.button === 0) clickMap(p.x, p.y);
+    painting = false;
   }
 }
 canvas.addEventListener('pointerup', pointerEnd);
@@ -394,6 +471,45 @@ function togglePause() {
   $('pause').textContent = paused ? 'Resume' : 'Pause';
 }
 
+// ---------- Saving ----------
+
+function refreshSaveStatus(message) {
+  let status = message;
+  if (!status) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
+      status = saved
+        ? 'Saved at tick ' + fmt(saved.sim.tick) + ' on ' + new Date(saved.savedAt).toLocaleString() + '.'
+        : 'Nothing saved yet. Saving keeps the world in this browser.';
+    } catch {
+      status = 'Saving is not available in this browser.';
+    }
+  }
+  $('saveStatus').textContent = status;
+}
+
+function saveWorld() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ savedAt: Date.now(), sim: sim.save() }));
+    refreshSaveStatus();
+  } catch {
+    refreshSaveStatus('Could not save: the browser refused to store the world.');
+  }
+}
+
+function loadWorld() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (!saved) return refreshSaveStatus('There is no saved world to load.');
+    sim.load(saved.sim);
+  } catch (error) {
+    return refreshSaveStatus('Could not load the saved world: ' + error.message);
+  }
+  showWorld();
+  refreshSaveStatus('Loaded the world saved at tick ' + fmt(sim.tick) + '. Charts restart from here.');
+}
+
 function loadSeed() {
   const seed = Number($('seedInput').value);
   if (Number.isInteger(seed) && seed > 0) newWorld(seed);
@@ -405,6 +521,16 @@ $('mut').oninput = (e) => ($('mutOut').textContent = (+e.target.value).toFixed(1
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
 $('heat').onclick = () => { sim.heatWave(); refreshAll(); };
 $('cold').onclick = () => { sim.coldSnap(); refreshAll(); };
+$('drought').onclick = () => { sim.drought(); refreshAll(); };
+$('plague').onclick = () => { sim.plague(); refreshAll(); };
+$('saveWorld').onclick = saveWorld;
+$('loadWorld').onclick = loadWorld;
+for (const b of $('kinds').children) {
+  b.onclick = () => {
+    brushKind = b.dataset.kind;
+    for (const other of $('kinds').children) other.setAttribute('aria-pressed', other === b);
+  };
+}
 $('pause').onclick = togglePause;
 $('reset').onclick = () => newWorld(randomSeed());
 $('bannerNew').onclick = () => newWorld(randomSeed());
@@ -438,8 +564,9 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
     togglePause();
-  } else if (e.key === '1') setTool('select');
-  else if (e.key === '2') setTool('food');
+  } else if (e.key >= '1' && e.key <= '6') {
+    setTool(['select', 'food', 'terrain', 'warm', 'cool', 'meteor'][e.key - 1]);
+  }
 });
 
 new ResizeObserver(() => map.resize()).observe($('map'));
@@ -448,4 +575,5 @@ map.resize();
 camera.fill();
 setLayer('none');
 newWorld(sim.seed);
+refreshSaveStatus();
 frame();

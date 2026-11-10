@@ -61,6 +61,15 @@
   .layers { top: 10px; right: 10px; display: flex; padding: 3px; gap: 2px; }
   .layers button { border: 0; padding: 4px 10px; font-size: 13px; color: var(--text-secondary); border-radius: 7px; }
   .layers button[aria-pressed=true] { background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+  .toolopts { top: 54px; left: 10px; padding: 8px 10px; font-size: 12px; color: var(--text-secondary); max-width: 250px; }
+  .toolopts[hidden] { display: none; }
+  .kinds { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .kinds[hidden], .size[hidden] { display: none; }
+  .kinds button { padding: 3px 9px; font-size: 12px; border-radius: 7px; color: var(--text-secondary); }
+  .kinds button[aria-pressed=true] { background: var(--surface); color: var(--text); border-color: var(--accent); }
+  .size { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .size input { flex: 1; min-width: 80px; }
+  #world.brush { cursor: crosshair; }
   .zoom { right: 10px; bottom: 10px; display: flex; flex-direction: column; padding: 3px; gap: 2px; }
   .zoom button { border: 0; width: 34px; height: 30px; padding: 0; font-size: 16px; border-radius: 7px; }
   .zoom #zoomFit { font-size: 11px; }
@@ -126,7 +135,9 @@
   #events .heat .pip { background: #e24b4a; }
   #events .cold .pip { background: #378add; }
   #events .species .pip, #events .boom .pip { background: #4f9a3a; }
-  #events .crash .pip { background: #d08a1c; }
+  #events .crash .pip, #events .drought .pip { background: #d08a1c; }
+  #events .plague .pip { background: #8e5bbf; }
+  #events .meteor .pip { background: #e24b4a; }
   button[aria-pressed=true]#inspFollow { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent); }
   .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
 
@@ -161,7 +172,9 @@
   .marker.heat::before { background: #e24b4a; }
   .marker.cold::before { background: #378add; }
   .marker.species::before, .marker.boom::before { background: #4f9a3a; }
-  .marker.crash::before { background: #d08a1c; }
+  .marker.crash::before, .marker.drought::before { background: #d08a1c; }
+  .marker.plague::before { background: #8e5bbf; }
+  .marker.meteor::before { background: #e24b4a; }
 
   /* Narrow screens: the sidebar becomes a sheet over the bottom of the map. */
   @media (max-width: 760px) {
@@ -172,6 +185,7 @@
     }
     .tool { width: 46px; padding: 6px 0 3px; }
     .layers { left: 70px; right: 10px; overflow-x: auto; }
+    .toolopts { top: 54px; left: 70px; }
     .layers button { padding: 4px 8px; }
     .sidebar {
       grid-area: map; z-index: 2; align-self: end; max-height: 62%;
@@ -202,6 +216,22 @@
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17V9"/><path d="M10 11c0-4 2.5-6.5 6.5-6.5C16.500 8.500 14 11 10 11z"/><path d="M10 13c0-2.500-1.500-4-4.500-4 0 2.500 1.500 4 4.500 4z"/></svg>
       Food
     </button>
+    <button class="tool" data-tool="terrain" aria-pressed="false" title="Paint terrain (3)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2 16l5-9 3 5 2.5-3.5L18 16z"/></svg>
+      Terrain
+    </button>
+    <button class="tool" data-tool="warm" aria-pressed="false" title="Warm an area (4)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.5"/><path d="M10 2.500v2M10 15.500v2M2.500 10h2M15.500 10h2M4.700 4.700l1.400 1.400M13.900 13.900l1.400 1.400M4.700 15.300l1.400-1.400M13.900 6.100l1.400-1.400"/></svg>
+      Warm
+    </button>
+    <button class="tool" data-tool="cool" aria-pressed="false" title="Cool an area (5)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 2.500v15M3.500 6.250l13 7.500M3.500 13.750l13-7.500"/></svg>
+      Cool
+    </button>
+    <button class="tool" data-tool="meteor" aria-pressed="false" title="Meteor strike (6)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="13" r="3.500"/><path d="M11 9l6-6M12.500 12.500L17 8M8 7.500L12 3"/></svg>
+      Meteor
+    </button>
   </nav>
 
   <section class="map" id="map">
@@ -211,6 +241,17 @@
       <button data-layer="temperature" aria-pressed="false">Temperature</button>
       <button data-layer="fertility" aria-pressed="false">Fertility</button>
       <button data-layer="territory" aria-pressed="false">Territory</button>
+    </div>
+    <div class="float toolopts" id="toolopts" hidden>
+      <div class="kinds" id="kinds" role="group" aria-label="Terrain to paint">
+        <button data-kind="water" aria-pressed="true">Water</button>
+        <button data-kind="fertile" aria-pressed="false">Fertile</button>
+        <button data-kind="plain" aria-pressed="false">Plain</button>
+        <button data-kind="desert" aria-pressed="false">Desert</button>
+        <button data-kind="mountain" aria-pressed="false">Mountain</button>
+      </div>
+      <label class="size" id="sizeRow">Brush size <input type="range" id="brushSize" min="10" max="90" step="5" value="30"></label>
+      <div class="tip" id="toolTip"></div>
     </div>
     <div class="float legend" id="legend"></div>
     <div class="float zoom">
@@ -295,10 +336,14 @@
       <h2>Environment</h2>
       <div class="field"><div class="row"><label for="fRate">Food supply</label><output id="fOut">1.0</output></div><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"></div>
       <div class="field"><div class="row"><label for="mut">Mutation rate</label><output id="mutOut">0.4</output></div><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"></div>
+      <h2>Disasters</h2>
       <div class="buttons">
         <button id="heat">Heat wave</button>
         <button id="cold">Cold snap</button>
+        <button id="drought">Drought</button>
+        <button id="plague">Plague</button>
       </div>
+      <p class="hint" style="margin-top:8px">A plague strikes the most numerous species. For a meteor, pick the Meteor tool and click the map.</p>
       <h2>World</h2>
       <div class="seedrow">
         <input id="seedInput" type="text" inputmode="numeric" aria-label="World seed">
@@ -306,6 +351,12 @@
       </div>
       <p class="hint">The same seed always builds the same world.</p>
       <div class="buttons"><button id="reset">New world</button></div>
+      <h2>Saved world</h2>
+      <div class="buttons">
+        <button id="saveWorld">Save</button>
+        <button id="loadWorld">Load</button>
+      </div>
+      <p class="hint" id="saveStatus" style="margin-top:8px"></p>
     </div>
   </aside>
 

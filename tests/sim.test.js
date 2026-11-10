@@ -346,3 +346,127 @@ test('the year starts in spring and peaks in summer', () => {
   assert.equal(seasonAt(Math.round(RULES.seasonLength * Math.PI * 1.5)).season, 'Winter');
   assert.equal(seasonAt(Math.round(RULES.seasonLength * Math.PI * 2) + 10).year, 2);
 });
+
+// ---------- World tools, disasters and saving ----------
+
+test('painting water blocks the spot, and painting land opens it again', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const cell = cellIndex(spot.x, spot.y);
+  sim.addFood(spot.x, spot.y);
+
+  sim.paintTerrain(spot.x, spot.y, 25, 'water');
+  assert.equal(sim.water[cell], 1);
+  assert.equal(sim.blocked[cell], 1);
+  assert.equal(sim.waterDistance[cell], 0);
+  assert.equal(sim.food.size, 0, 'plants under the new water should go');
+
+  sim.paintTerrain(spot.x, spot.y, 25, 'fertile');
+  assert.equal(sim.water[cell], 0);
+  assert.equal(sim.terrain[cell], FERTILE);
+  assert.equal(sim.blocked[cell], 0);
+  assert.ok(sim.waterDistance[cell] > 0);
+
+  sim.paintTerrain(spot.x, spot.y, 25, 'mountain');
+  assert.equal(sim.blocked[cell], 1);
+  assert.throws(() => sim.paintTerrain(spot.x, spot.y, 25, 'lava'));
+});
+
+test('painting works across the east-west seam', () => {
+  const sim = emptyWorld();
+  sim.paintTerrain(2, HEIGHT / 2, 30, 'desert');
+  assert.equal(sim.terrain[cellIndex(5, HEIGHT / 2)], DESERT);
+  assert.equal(sim.terrain[cellIndex(WIDTH - 5, HEIGHT / 2)], DESERT);
+});
+
+test('the temperature brush warms a spot, leaves distant land alone, and fades', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const cell = cellIndex(spot.x, spot.y);
+  const far = cellIndex((spot.x + WIDTH / 2) % WIDTH, spot.y);
+  const before = sim.temperature[cell], farBefore = sim.temperature[far];
+
+  sim.paintTemperature(spot.x, spot.y, 60, 10);
+  assert.ok(sim.temperature[cell] > before + 8);
+  assert.equal(sim.temperature[far], farBefore);
+  for (let i = 0; i < 40; i++) sim.paintTemperature(spot.x, spot.y, 60, 10);
+  assert.ok(sim.tempOffset[cell] <= RULES.tempOffsetLimit);
+
+  const painted = sim.tempOffset[cell];
+  for (let i = 0; i < 3000; i++) sim.step(0, 0);
+  assert.ok(sim.tempOffset[cell] < painted / 3);
+});
+
+test('a drought slows plant growth, then ends', () => {
+  const grown = (withDrought) => {
+    const sim = emptyWorld();
+    if (withDrought) sim.drought();
+    for (let i = 0; i < 300; i++) sim.step(1, 0);
+    return sim.food.size;
+  };
+  assert.ok(grown(true) < grown(false) * 0.6);
+
+  const sim = emptyWorld();
+  sim.drought();
+  for (let i = 0; i <= RULES.droughtLength; i++) sim.step(0, 0);
+  assert.deepEqual(sim.events.filter((e) => e.kind === 'drought').map((e) => e.text), ['A drought began', 'The drought ended']);
+});
+
+test('a plague strikes only the most numerous species', () => {
+  const sim = run(11, 0);
+  const before = sim.species.map((sp) => sp.count);
+  const largest = before.indexOf(Math.max(...before));
+  const died = sim.plague();
+  sim.step(0, 0);
+  assert.ok(died > before[largest] * 0.4 && died < before[largest] * 0.8);
+  assert.equal(sim.species[largest].count, before[largest] - died);
+  assert.equal(sim.carcasses.size, died);
+  assert.ok(sim.events.some((e) => e.kind === 'plague' && e.species === largest));
+});
+
+test('a meteor kills what is near, spares what is far, and scorches the land', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const near = creature({ x: spot.x + 20, y: spot.y });
+  const far = creature({ x: (spot.x + RULES.meteorRadius + 150) % WIDTH, y: spot.y });
+  sim.creatures = [near, far];
+  sim.addFood(spot.x + 5, spot.y);
+
+  assert.equal(sim.meteor(spot.x, spot.y), 1);
+  assert.equal(sim.food.size, 0);
+  assert.equal(sim.terrain[cellIndex(spot.x, spot.y)], DESERT);
+  assert.ok(sim.tempOffset[cellIndex(spot.x, spot.y)] > 10);
+  sim.step(0, 0);
+  assert.deepEqual(sim.creatures, [far]);
+  assert.ok(sim.events.some((e) => e.kind === 'meteor'));
+});
+
+test('a saved world survives JSON and continues exactly as the original would', () => {
+  const original = run(42, 700);
+  original.paintTerrain(300, 300, 40, 'water');
+  original.paintTemperature(600, 200, 80, -8);
+  original.drought();
+  for (let i = 0; i < 55; i++) original.step(1, 0.4); // stop between temperature refreshes
+  const saved = JSON.parse(JSON.stringify(original.save()));
+
+  const restored = createSim({ seed: 999 });
+  restored.generate();
+  restored.load(saved);
+  assert.equal(restored.tick, original.tick);
+  assert.equal(restored.seed, 42);
+  assert.equal(snapshot(restored), snapshot(original));
+
+  for (let i = 0; i < 600; i++) {
+    original.step(1, 0.4);
+    restored.step(1, 0.4);
+  }
+  assert.equal(snapshot(restored), snapshot(original));
+  assert.deepEqual(restored.events, original.events);
+  assert.equal(restored.carcasses.size, original.carcasses.size);
+});
+
+test('loading rejects a save from another version', () => {
+  const sim = run(1, 0);
+  assert.throws(() => sim.load({ ...sim.save(), version: 99 }));
+  assert.throws(() => sim.load(null));
+});

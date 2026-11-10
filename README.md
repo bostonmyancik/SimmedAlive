@@ -24,12 +24,18 @@ source .venv/bin/activate && python3 app.py
 ## Controls
 
 - **Map**: drag to pan (the world wraps around east-west), scroll or pinch to zoom, or use the + / − / Fit buttons.
-- **Tools** (left rail): Select (key `1`) inspects the creature you click; Food (key `2`) drops food where you click.
+- **Tools** (left rail, keys `1` to `6`):
+  - Select inspects the creature you click.
+  - Food scatters plants as you drag.
+  - Terrain paints water, fertile land, plain, desert or mountain.
+  - Warm and Cool change the temperature of an area; the change fades over a few thousand ticks.
+  - Meteor strikes where you click: everything in the circle dies and the land is scorched.
+  - With a brush tool active, pan by dragging with the right or middle button, or with two fingers.
 - **Layers** (top of the map): terrain (fertile land, plain, desert, mountains), temperature, fertility (how readily food grows), or territory (which species dominates each area).
 - **On the map**: green dots are plants, crosses are carcasses, a blue ring means thirsty, and a bigger body means stronger. Mountains and water block movement.
 - **Sidebar tabs**: Species (every living species), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
-- **Bottom bar**: pause (or Space), speed, the tick, year and season, and a timeline with marks for new species, extinctions, booms, crashes, heat waves and cold snaps.
-- **Settings**: food supply, mutation rate, heat wave, cold snap, and the world seed. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared.
+- **Bottom bar**: pause (or Space), speed, the tick, year and season, and a timeline with marks for new species, extinctions, booms, crashes and disasters.
+- **Settings**: food supply, mutation rate, disasters (heat wave, cold snap, drought, plague), the world seed, and Save / Load, which keep one world in this browser. A loaded world carries on exactly where it left off, though the charts restart. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared.
 
 ## Where things live
 
@@ -48,6 +54,7 @@ source .venv/bin/activate && python3 app.py
   - `species.js`: trait distance between creatures and species, and names and colours for new species.
   - `grid.js`: fast "nearest thing" lookups.
   - `rng.js`: seeded random numbers.
+  - `pack.js`: packs the map grids into text for saved worlds.
 - `tests/`: Node tests for the simulation.
 
 ## Tests
@@ -63,7 +70,8 @@ npm test
 - **Terrain.** Plants grow best on fertile land near water, poorly in desert, and not at all on mountains. Mountains and water cannot be crossed.
 - **Diet.** Every creature has a `diet` from 0 (plants only) to 1 (meat only). A plant is worth less the more meat is in the diet, and a carcass is worth more. Every death leaves a carcass that rots after a while. Meat-eaters bite harder and hunt weaker species when hungry.
 - **Speciation.** Traits mutate at each birth. A newborn that has drifted too far from its species' founder joins a closely related species it resembles, or founds a new one. A species and the one it split from do not fight; all other species do. A new species is announced once it has 10 members.
-- **Events.** The sim logs new species, extinctions, booms and crashes (a population doubling or halving between checks), heat waves and cold snaps.
+- **Events.** The sim logs new species, extinctions, booms and crashes (a population doubling or halving between checks), and every disaster.
+- **Disasters.** A drought cuts plant growth and raises thirst for 2,500 ticks. A plague kills about 60% of the most numerous species. A meteor kills everything within 90 pixels.
 
 ## Tuning
 
@@ -91,4 +99,4 @@ The balance settings are `DEFAULT_PARAMS`:
 | `tempMutationScale` | How fast preferred temperature mutates |
 | `speciationDistance` | How far traits must drift from a species' founder before a lineage splits off |
 
-Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species) are in `RULES` in the same file.
+Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths) are in `RULES` in the same file.

@@ -210,7 +210,8 @@ export function createMapView(canvas, sim, camera) {
   }
 
   // interp: 0..1 position between the previous tick and this one.
-  function draw(interp, selected) {
+  // brush: { x, y, radius } in world pixels to outline, or null.
+  function draw(interp, selected, brush) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = css('--bg');
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -227,6 +228,15 @@ export function createMapView(canvas, sim, camera) {
       ctx.rect(0, 0, WIDTH, HEIGHT);
       ctx.clip();
       drawWorld(left - offset - 12, right - offset + 12, interp, selected);
+      if (brush) {
+        ctx.strokeStyle = css('--text');
+        ctx.lineWidth = 1.5 / zoom;
+        for (const shift of [-WIDTH, 0, WIDTH]) {
+          ctx.beginPath();
+          ctx.arc(brush.x + shift, brush.y, brush.radius, 0, 6.29);
+          ctx.stroke();
+        }
+      }
       ctx.restore();
     }
   }

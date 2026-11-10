@@ -6,9 +6,10 @@ import { mulberry32 } from './rng.js';
 import { SpatialGrid } from './grid.js';
 import { spawnCreature, makeOffspring } from './creatures.js';
 import { TRAITS, traitDistance, traitsOf, nameSpecies, colorForSpecies } from './species.js';
+import { pack, unpack } from './pack.js';
 import {
-  GRID_W, GRID_H, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN,
-  cellIndex, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
+  GRID_W, GRID_H, CELL, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN,
+  cellIndex, wrapDistance, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
 } from './world.js';
 
 const BUCKET_SIZE = 40; // pixels; roughly a typical vision radius
@@ -24,6 +25,15 @@ TERRAIN_FERTILITY[PLAIN] = RULES.terrainFertility.plain;
 TERRAIN_FERTILITY[FERTILE] = RULES.terrainFertility.fertile;
 TERRAIN_FERTILITY[DESERT] = RULES.terrainFertility.desert;
 TERRAIN_FERTILITY[MOUNTAIN] = 0;
+
+// What the terrain brush can paint.
+const PAINT_KINDS = { plain: PLAIN, fertile: FERTILE, desert: DESERT, mountain: MOUNTAIN };
+
+const SAVE_VERSION = 1;
+const CREATURE_FIELDS = [
+  'id', 'parentId', 'species', 'x', 'y', 'heading', 'energy', 'hydration', 'thirsty', 'age',
+  'bornTick', 'generation', 'offspring', ...TRAITS,
+];
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -46,6 +56,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     blocked: new Uint8Array(GRID_W * GRID_H),         // 1 = water or mountain
     waterDistance: new Float32Array(GRID_W * GRID_H), // cells to walk to water
     temperature: new Float32Array(GRID_W * GRID_H),
+    tempOffset: new Float32Array(GRID_W * GRID_H),    // warming or cooling from brushes and meteors
     food: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE),     // plants: { x, y }
     carcasses: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE), // meat: { x, y, tick }
     creatures: [],
@@ -53,6 +64,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     events: [],          // the event log: { tick, kind, species, text }
     tick: 0,
     temperatureBoost: 0, // degrees added everywhere; fades over time
+    droughtUntil: 0,     // a drought is on while tick < droughtUntil
     generate,
     step,
     stats,
@@ -62,6 +74,13 @@ export function createSim({ seed = 1, params = {} } = {}) {
     lineage,
     heatWave: () => weather(9, 'heat', 'Heat wave'),
     coldSnap: () => weather(-9, 'cold', 'Cold snap'),
+    drought,
+    plague,
+    meteor,
+    paintTerrain,
+    paintTemperature,
+    save,
+    load,
   };
 
   // Rebuilt at the start of every tick to find nearby enemies quickly.
@@ -70,7 +89,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
   let livingSpecies = 0;
 
   function refreshTemperature() {
-    updateTemperature(sim.temperature, sim.fronts, sim.tick, sim.temperatureBoost, P);
+    updateTemperature(sim.temperature, sim.fronts, sim.tick, sim.temperatureBoost, P, sim.tempOffset);
   }
 
   function logEvent(kind, text, species = null) {
@@ -97,12 +116,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.events = [];
     sim.tick = 0;
     sim.temperatureBoost = 0;
+    sim.droughtUntil = 0;
+    sim.tempOffset.fill(0);
 
     generateLakes(sim.water, random);
     generateMountains(sim.terrain, sim.water, random);
     computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
     classifyLand(sim.terrain, sim.water, sim.waterDistance, random);
-    for (let i = 0; i < sim.blocked.length; i++) sim.blocked[i] = sim.water[i] || sim.terrain[i] === MOUNTAIN ? 1 : 0;
+    rebuildBlocked();
 
     // Warm and cold fronts, each drifting in its own direction.
     sim.fronts = FRONT_DRIFTS.map(([vx, vy], i) => ({
@@ -148,6 +169,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }
   }
 
+  function rebuildBlocked() {
+    for (let i = 0; i < sim.blocked.length; i++) sim.blocked[i] = sim.water[i] || sim.terrain[i] === MOUNTAIN ? 1 : 0;
+  }
+
   // Land a creature can stand on and walk to water from.
   function habitable(cell) {
     return !sim.blocked[cell] && sim.waterDistance[cell] < 1e8;
@@ -174,7 +199,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
   // Plants sprout at random spots, subject to how fertile the land is there.
   function growFood(foodRate) {
-    let budget = foodRate * P.foodGrowth;
+    let budget = foodRate * P.foodGrowth * (inDrought() ? RULES.droughtFoodFactor : 1);
     while (budget > 0) {
       if (random() < budget && sim.food.size < RULES.maxFood) {
         const x = random() * WIDTH, y = random() * HEIGHT;
@@ -191,6 +216,168 @@ export function createSim({ seed = 1, params = {} } = {}) {
       if (!carcass.eaten) sim.carcasses.remove(carcass);
     }
     if (done) carcassQueue = carcassQueue.slice(done);
+  }
+
+  // ---------- World tools and disasters ----------
+
+  const inDrought = () => sim.tick < sim.droughtUntil;
+
+  // Calls visit(cell, distance) for each grid cell whose centre is within
+  // `radius` pixels of (x, y), allowing for the east-west wrap.
+  function forCellsNear(x, y, radius, visit) {
+    const reach = Math.ceil(radius / CELL) + 1;
+    const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
+    for (let gy = Math.max(0, cy - reach); gy <= Math.min(GRID_H - 1, cy + reach); gy++) {
+      for (let ax = -reach; ax <= reach; ax++) {
+        const gx = ((cx + ax) % GRID_W + GRID_W) % GRID_W;
+        const dx = wrapDistance(gx * CELL + CELL / 2 - x, WIDTH), dy = gy * CELL + CELL / 2 - y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance <= radius) visit(gy * GRID_W + gx, distance);
+      }
+    }
+  }
+
+  const within = (item, x, y, radius) => {
+    const dx = wrapDistance(item.x - x, WIDTH), dy = item.y - y;
+    return dx * dx + dy * dy <= radius * radius;
+  };
+
+  // Call after the map changes: updates what blocks movement and the routes
+  // to water, and clears plants and carcasses off water and mountains.
+  function terrainChanged() {
+    rebuildBlocked();
+    computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
+    for (const plant of [...sim.food]) if (sim.blocked[cellIndex(plant.x, plant.y)]) sim.food.remove(plant);
+    for (const carcass of [...sim.carcasses]) {
+      if (!sim.blocked[cellIndex(carcass.x, carcass.y)]) continue;
+      sim.carcasses.remove(carcass);
+      carcass.eaten = true;
+    }
+  }
+
+  // Paints terrain in a circle. `kind` is 'water', 'plain', 'fertile', 'desert' or 'mountain'.
+  function paintTerrain(x, y, radius, kind) {
+    if (kind !== 'water' && !(kind in PAINT_KINDS)) throw new Error('Unknown terrain: ' + kind);
+    forCellsNear(x, y, radius, (cell) => {
+      sim.water[cell] = kind === 'water' ? 1 : 0;
+      sim.terrain[cell] = kind === 'water' ? PLAIN : PAINT_KINDS[kind];
+    });
+    terrainChanged();
+  }
+
+  // Warms (positive `degrees`) or cools a circle, strongest at the centre.
+  // The change fades away over a few thousand ticks.
+  function paintTemperature(x, y, radius, degrees) {
+    forCellsNear(x, y, radius, (cell, distance) => {
+      sim.tempOffset[cell] = clamp(
+        sim.tempOffset[cell] + degrees * (1 - distance / radius),
+        -RULES.tempOffsetLimit, RULES.tempOffsetLimit,
+      );
+    });
+    refreshTemperature();
+  }
+
+  // Plants grow poorly and creatures get thirsty faster for a while.
+  function drought() {
+    sim.droughtUntil = sim.tick + RULES.droughtLength;
+    logEvent('drought', 'A drought began');
+  }
+
+  // A disease sweeps through the most numerous species. Returns how many died.
+  function plague() {
+    const target = sim.species.reduce((a, b) => (b.count > a.count ? b : a));
+    if (!target.count) return 0;
+    let died = 0;
+    for (const c of sim.creatures) {
+      if (c.species === target.id && c.energy > 0 && random() < RULES.plagueDeathRate) {
+        c.energy = 0; // removed, leaving a carcass, at the end of the next tick
+        died++;
+      }
+    }
+    logEvent('plague', 'A plague killed ' + died + ' of ' + target.count + ' ' + target.name, target.id);
+    return died;
+  }
+
+  // A meteor strikes (x, y): everything nearby dies, the land is scorched to
+  // desert and stays hot for a while. Returns how many creatures died.
+  function meteor(x, y) {
+    const radius = RULES.meteorRadius;
+    let died = 0;
+    for (const c of sim.creatures) {
+      if (c.energy > 0 && within(c, x, y, radius)) {
+        c.energy = 0;
+        died++;
+      }
+    }
+    for (const plant of [...sim.food]) if (within(plant, x, y, radius)) sim.food.remove(plant);
+    forCellsNear(x, y, radius * 0.7, (cell) => {
+      if (!sim.water[cell] && sim.terrain[cell] !== MOUNTAIN) sim.terrain[cell] = DESERT;
+    });
+    paintTemperature(x, y, radius * 1.5, RULES.meteorHeat);
+    logEvent('meteor', 'A meteor killed ' + died + (died === 1 ? ' creature' : ' creatures'));
+    return died;
+  }
+
+  // ---------- Saving ----------
+
+  // Everything needed to carry on later, as plain data that survives JSON.
+  function save() {
+    return {
+      version: SAVE_VERSION,
+      seed: sim.seed,
+      params: { ...P },
+      tick: sim.tick,
+      rng: random.getState(),
+      nextCreatureId,
+      temperatureBoost: sim.temperatureBoost,
+      droughtUntil: sim.droughtUntil,
+      water: pack(sim.water),
+      terrain: pack(sim.terrain),
+      temperature: pack(sim.temperature),
+      tempOffset: pack(sim.tempOffset),
+      fronts: sim.fronts.map((f) => ({ ...f })),
+      species: sim.species.map((sp) => ({ ...sp, origin: { ...sp.origin } })),
+      creatures: sim.creatures.map((c) => CREATURE_FIELDS.map((field) => c[field])),
+      food: [...sim.food].map((f) => [f.x, f.y]),
+      carcasses: [...sim.carcasses].map((k) => [k.x, k.y, k.tick]),
+      events: sim.events.map((e) => ({ ...e })),
+    };
+  }
+
+  // Restores a world made by save(). The run then continues exactly as it would have.
+  function load(data) {
+    if (!data || data.version !== SAVE_VERSION) throw new Error('This save is from a different version');
+    unpack(data.water, sim.water);
+    unpack(data.terrain, sim.terrain);
+    unpack(data.temperature, sim.temperature);
+    unpack(data.tempOffset, sim.tempOffset);
+    rebuildBlocked();
+    computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
+
+    Object.assign(P, data.params);
+    sim.seed = data.seed;
+    sim.tick = data.tick;
+    random = mulberry32(0);
+    random.setState(data.rng);
+    nextCreatureId = data.nextCreatureId;
+    sim.temperatureBoost = data.temperatureBoost;
+    sim.droughtUntil = data.droughtUntil;
+    sim.fronts = data.fronts.map((f) => ({ ...f }));
+    sim.species = data.species.map((sp) => ({ ...sp, origin: { ...sp.origin } }));
+    livingSpecies = sim.species.filter((sp) => sp.count > 0).length;
+    sim.events = data.events.map((e) => ({ ...e }));
+    sim.creatures = data.creatures.map((values) => {
+      const c = {};
+      CREATURE_FIELDS.forEach((field, i) => { c[field] = values[i]; });
+      return c;
+    });
+
+    sim.food.clear();
+    for (const [x, y] of data.food) sim.food.add({ x, y });
+    sim.carcasses.clear();
+    carcassQueue = data.carcasses.map(([x, y, tick]) => ({ x, y, tick, eaten: false }));
+    for (const carcass of carcassQueue) sim.carcasses.add(carcass);
+    carcassQueue.sort((a, b) => a.tick - b.tick);
   }
 
   // ---------- Species ----------
@@ -408,7 +595,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost energy.
     c.energy -= 0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
       + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress;
-    c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12);
+    c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12)
+      * (inDrought() ? RULES.droughtThirstFactor : 1);
     c.age++;
 
     // Well-fed, comfortable creatures split in two.
@@ -433,7 +621,11 @@ export function createSim({ seed = 1, params = {} } = {}) {
       front.y = (front.y + front.vy + HEIGHT) % HEIGHT;
     }
     sim.temperatureBoost *= RULES.boostDecay;
-    if (sim.tick % 10 === 0) refreshTemperature();
+    if (sim.tick % 10 === 0) {
+      for (let i = 0; i < sim.tempOffset.length; i++) sim.tempOffset[i] *= RULES.tempOffsetDecay;
+      refreshTemperature();
+    }
+    if (sim.droughtUntil && sim.tick === sim.droughtUntil) logEvent('drought', 'The drought ended');
 
     growFood(foodRate);
     rotCarcasses();
