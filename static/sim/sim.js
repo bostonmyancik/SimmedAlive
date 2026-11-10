@@ -338,6 +338,26 @@ export function createSim({ seed = 1, params = {} } = {}) {
     return died;
   }
 
+  // In auto mode, a disaster strikes at random about once every
+  // `autoDisasterEvery` ticks. Called once per tick.
+  function maybeRandomDisaster() {
+    if (!P.autoDisasters || random() >= 1 / P.autoDisasterEvery) return;
+    const strikes = {
+      heat: sim.heatWave,
+      cold: sim.coldSnap,
+      drought,
+      plague,
+      meteor: () => meteor(random() * WIDTH, random() * HEIGHT),
+    };
+    const weights = { ...RULES.autoDisasterWeights };
+    if (inDrought()) weights.drought = 0; // one drought at a time
+    let pick = random() * Object.values(weights).reduce((a, b) => a + b, 0);
+    for (const kind of Object.keys(weights)) {
+      pick -= weights[kind];
+      if (pick < 0) return strikes[kind]();
+    }
+  }
+
   // ---------- Saving ----------
 
   // Everything needed to carry on later, as plain data that survives JSON.
@@ -727,6 +747,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }
     if (sim.droughtUntil && sim.tick === sim.droughtUntil) logEvent('drought', 'The drought ended');
 
+    maybeRandomDisaster();
     growFood(foodRate);
     rotCarcasses();
 

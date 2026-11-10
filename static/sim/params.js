@@ -37,6 +37,10 @@ export const DEFAULT_PARAMS = {
   // Swimming
   swimmerShare: 0.2,       // chance that a creature is born able to swim
 
+  // Random disasters
+  autoDisasters: false,    // let disasters strike on their own now and then
+  autoDisasterEvery: 15000, // average ticks between them (a year is about 18,850)
+
   // Speciation
   speciationDistance: 1.6, // how far traits must drift from a species' founder to split off
 };
@@ -112,6 +116,9 @@ export const RULES = {
   plagueDeathRate: 0.6,        // share of the largest species a plague kills
   meteorRadius: 90,            // everything within this many pixels dies
   meteorHeat: 15,              // degrees of local warming at the impact
+
+  // How likely each random disaster is, relative to the others.
+  autoDisasterWeights: { heat: 5, cold: 5, drought: 4, plague: 3, meteor: 3 },
 
   // Event log
   trendCheckEvery: 1500,       // ticks between boom and crash checks

@@ -164,6 +164,8 @@
   .field output { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
   .field input[type=range] { width: 100%; margin: 4px 0 0; }
   .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0 6px; cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
   .seedrow { display: flex; gap: 8px; margin-bottom: 8px; }
   .seedrow input {
     flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
@@ -383,6 +385,8 @@
         <button id="plague">Plague</button>
       </div>
       <p class="hint" style="margin-top:8px">A plague strikes the most numerous species. For a meteor, pick the Meteor tool and click the map.</p>
+      <label class="check"><input type="checkbox" id="autoDisasters"> Random disasters</label>
+      <p class="hint">When on, one of these (or a meteor) strikes by itself about once a year.</p>
       <h2>World</h2>
       <div class="seedrow">
         <input id="seedInput" type="text" inputmode="numeric" aria-label="World seed">
