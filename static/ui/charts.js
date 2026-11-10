@@ -99,30 +99,60 @@ export function drawLineChart(canvas, history, species, tick, { valueOf, fromZer
   }
 }
 
-// Stacked bands showing each species' share of the population over time.
+// Height of the tick labels under the timeline bands.
+const AXIS_HEIGHT = 14;
+
+// A round number of ticks between axis labels, giving at most about eight labels.
+function axisStep(span) {
+  for (const step of [100, 200, 500, 1000, 2000, 5000, 10000]) if (span / step <= 8) return step;
+  return 20000;
+}
+
+// The timeline strip: stacked bands showing each species' share of the
+// population over time, with tick labels underneath. `tick` is the newest
+// tick reached, which sits at the right-hand end.
 export function drawTimeline(canvas, history, species, tick) {
   const p = prepare(canvas);
   if (!p) return;
   const { ctx, w, h } = p;
   const start = windowStart(tick), span = windowSpan(tick);
+  const bandsHeight = h - AXIS_HEIGHT;
+  const xOf = (t) => (t - start) / span * w;
   ctx.fillStyle = css('--surface');
-  ctx.fillRect(0, 0, w, h);
-  if (history.length < 2) return;
+  ctx.fillRect(0, 0, w, bandsHeight);
 
-  const xOf = (s) => (s.tick - start) / span * w;
-  const totals = history.map((s) => s.counts.reduce((a, b) => a + b, 0) || 1);
-  let lower = history.map(() => 0);
-  for (const sp of species) {
-    const upper = history.map((s, i) => lower[i] + (s.counts[sp.id] || 0) / totals[i]);
+  if (history.length >= 2) {
+    const totals = history.map((s) => s.counts.reduce((a, b) => a + b, 0) || 1);
+    let lower = history.map(() => 0);
+    for (const sp of species) {
+      const upper = history.map((s, i) => lower[i] + (s.counts[sp.id] || 0) / totals[i]);
+      ctx.beginPath();
+      history.forEach((s, i) => ctx.lineTo(xOf(s.tick), bandsHeight - upper[i] * bandsHeight));
+      for (let i = history.length - 1; i >= 0; i--) ctx.lineTo(xOf(history[i].tick), bandsHeight - lower[i] * bandsHeight);
+      ctx.closePath();
+      ctx.fillStyle = sp.color;
+      ctx.globalAlpha = 0.8;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      lower = upper;
+    }
+  }
+
+  // Tick labels along the bottom.
+  const step = axisStep(span);
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.fillStyle = css('--text-muted');
+  ctx.strokeStyle = css('--border');
+  ctx.lineWidth = 1;
+  for (let t = Math.ceil(start / step) * step; t <= start + span; t += step) {
+    const x = Math.round(xOf(t)) + 0.5;
     ctx.beginPath();
-    history.forEach((s, i) => ctx.lineTo(xOf(s), h - upper[i] * h));
-    for (let i = history.length - 1; i >= 0; i--) ctx.lineTo(xOf(history[i]), h - lower[i] * h);
-    ctx.closePath();
-    ctx.fillStyle = sp.color;
-    ctx.globalAlpha = 0.8;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    lower = upper;
+    ctx.moveTo(x, bandsHeight);
+    ctx.lineTo(x, bandsHeight + 3);
+    ctx.stroke();
+    const text = t.toLocaleString('en-US');
+    const width = ctx.measureText(text).width;
+    ctx.fillText(text, Math.min(w - width - 1, Math.max(1, x - width / 2)), h - 2);
   }
 }
 
