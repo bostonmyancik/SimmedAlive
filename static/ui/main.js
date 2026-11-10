@@ -26,6 +26,7 @@ const camera = createCamera(WIDTH, HEIGHT);
 const map = createMapView(canvas, sim, camera);
 
 const AUTOSAVE_EVERY_MS = 5000;
+const CHECKPOINT_EVERY = 400; // ticks between the checkpoints that rewinding uses
 const BRUSH_TOOLS = ['food', 'terrain', 'warm', 'cool']; // drag to paint with these
 const TOOL_TIPS = {
   food: 'Drag to scatter plants.',
@@ -42,6 +43,16 @@ let hover = null;          // pointer position over the map, in view pixels
 let autosavedTick = -1;    // tick of the last successful autosave
 let worldEdited = false;   // the world changed without the tick advancing (brush, disaster, new world)
 let savingNow = false;     // an autosave request is in flight
+
+// Rewinding. The page keeps a checkpoint of the whole world every so often.
+// Dragging the timeline loads the checkpoint before the chosen tick and
+// replays forward to it. Until the sim runs or is edited again, everything up
+// to `latestTick` is kept, so you can scrub back and forth; after that, the
+// run carries on from where you are and the old future is dropped.
+let checkpoints = [];      // [{ tick, text, foodRate, mutationRate }], oldest first
+let latestTick = 0;        // the newest tick this run has reached ("now")
+let scrubbing = false;     // the timeline is being dragged
+const inPast = () => sim.tick < latestTick;
 let selected = null;       // the creature shown in the Inspector
 let selectedDiedAt = null; // tick at which it died, if it has
 let following = false;     // keep the camera on the selected creature
@@ -65,27 +76,86 @@ function dietWords(diet) {
 
 // ---------- Panels ----------
 
+// Cards are built once per species and then updated in place, so a click on
+// a card's header is never lost to a redraw.
+const cards = new Map(); // species id -> { root, count, share, facts }
+let allCollapsed = readPreference('lifesim.cardsCollapsed') === 'yes';
+const flipped = new Set(); // species whose card differs from the "all" setting
+const isCollapsed = (id) => allCollapsed !== flipped.has(id);
+
+function readPreference(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function showCollapsed(id) {
+  const card = cards.get(id);
+  card.root.classList.toggle('collapsed', isCollapsed(id));
+  card.head.setAttribute('aria-expanded', !isCollapsed(id));
+}
+
+function makeCard(sp) {
+  const root = document.createElement('div');
+  root.className = 'card';
+  root.innerHTML =
+    '<button class="cardhead" title="Show or hide details">' + dot(sp.color) + '<span class="name"></span><span class="count"></span>' +
+    '<svg class="chev" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5l4 4 4-4"/></svg></button>' +
+    '<div class="share"><i style="background:' + sp.color + '"></i></div><dl class="facts"></dl>';
+  const card = {
+    root,
+    head: root.querySelector('.cardhead'),
+    count: root.querySelector('.count'),
+    share: root.querySelector('.share i'),
+    facts: root.querySelector('.facts'),
+  };
+  root.querySelector('.name').textContent = sp.name;
+  card.head.onclick = () => {
+    if (!flipped.delete(sp.id)) flipped.add(sp.id);
+    showCollapsed(sp.id);
+  };
+  cards.set(sp.id, card);
+  showCollapsed(sp.id);
+  return card;
+}
+
+function setAllCollapsed(on) {
+  allCollapsed = on;
+  flipped.clear();
+  for (const id of cards.keys()) showCollapsed(id);
+  $('collapseAll').textContent = on ? 'Expand all' : 'Collapse all';
+  try { localStorage.setItem('lifesim.cardsCollapsed', on ? 'yes' : 'no'); } catch { /* not remembered */ }
+}
+
 function refreshSpecies() {
   const stats = sim.stats();
   const living = livingSpecies();
   const total = sim.creatures.length || 1;
-  $('cards').innerHTML = living.map((sp) => {
+  $('speciesSummary').textContent = fmt(sim.creatures.length) + ' creatures · ' + living.length + ' species';
+
+  const livingIds = new Set(living.map((sp) => sp.id));
+  for (const [id, card] of cards) {
+    if (livingIds.has(id)) continue;
+    card.root.remove();
+    cards.delete(id);
+  }
+  const container = $('cards');
+  living.forEach((sp, position) => {
+    const card = cards.get(sp.id) || makeCard(sp);
     const st = stats[sp.id];
-    return '<div class="card">' +
-      '<div class="name">' + dot(sp.color) + sp.name +
-      (sp.parent !== null ? '<span class="split">from ' + sim.species[sp.parent].name + '</span>' : '') + '</div>' +
-      '<div class="count">' + fmt(sp.count) + '</div>' +
-      '<div class="share"><i style="background:' + sp.color + ';width:' + (sp.count / total * 100) + '%"></i></div>' +
-      '<dl class="facts">' +
+    card.count.textContent = fmt(sp.count);
+    card.share.style.width = (sp.count / total * 100) + '%';
+    card.facts.innerHTML =
+      (sp.parent !== null ? '<dt>Split from</dt><dd>' + sim.species[sp.parent].name + '</dd>' : '') +
       '<dt>Diet</dt><dd>' + dietWords(st.diet) + '</dd>' +
+      '<dt>Can swim</dt><dd>' + Math.round(st.swimmers * 100) + '%</dd>' +
       '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
       '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
       '<dt>Vision</dt><dd>' + Math.round(st.vision) + '</dd>' +
       '<dt>Prefers</dt><dd>' + Math.round(st.preferredTemp) + '°C</dd>' +
       '<dt>Kills</dt><dd>' + fmt(sp.kills) + '</dd>' +
-      '<dt>Latest generation</dt><dd>' + st.maxGeneration + '</dd>' +
-      '</dl></div>';
-  }).join('');
+      '<dt>Latest generation</dt><dd>' + st.maxGeneration + '</dd>';
+    // Keep the cards sorted by population, moving one only when its place changed.
+    if (container.children[position] !== card.root) container.insertBefore(card.root, container.children[position] || null);
+  });
   const extinct = shownSpecies().filter((sp) => sp.count === 0);
   $('extinctList').textContent = extinct.length ? 'Extinct: ' + extinct.map((sp) => sp.name).join(', ') : '';
 }
@@ -124,6 +194,7 @@ function refreshInspector() {
   $('inspVision').textContent = c.vision.toFixed(0);
   $('inspStrength').textContent = c.strength.toFixed(2);
   $('inspDiet').textContent = dietWords(c.diet);
+  $('inspSwims').textContent = c.swimmer ? 'Yes' : 'No';
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
   $('inspBorn').textContent = c.bornTick ? 'Tick ' + fmt(c.bornTick) : 'At the start';
@@ -178,31 +249,54 @@ const METRICS = {
   strength: traitMetric('strength', (v) => v.toFixed(2)),
   preferredTemp: { ...traitMetric('preferredTemp', (v) => v.toFixed(1) + '°C'), floor: -Infinity },
   diet: traitMetric('diet', (v) => Math.round(v * 100) + '% meat'),
+  swimmers: traitMetric('swimmers', (v) => Math.round(v * 100) + '% can swim'),
 };
 
 function drawCharts() {
   const shown = shownSpecies();
-  drawTimeline($('timeline'), history, shown, sim.tick);
+  drawTimeline($('timeline'), history, shown, latestTick);
   if ($('tab-charts').hidden) return;
-  drawLineChart($('hist'), history, shown, sim.tick, METRICS[$('metric').value]);
+  drawLineChart($('hist'), history, shown, latestTick, METRICS[$('metric').value]);
   $('chartKey').innerHTML = livingSpecies().map((sp) => '<span>' + dot(sp.color) + sp.name + '</span>').join('');
   drawFamilyTree($('tree'), shown, sim.species, sim.tick);
 }
 
 function refreshClock() {
   const { year, season } = seasonAt(sim.tick);
-  $('clock').textContent = 'Tick ' + fmt(sim.tick) + ' · Year ' + year + ' · ' + season
-    + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
+  $('clock').textContent = (inPast() ? 'Viewing tick ' + fmt(sim.tick) + ' of ' + fmt(latestTick) : 'Tick ' + fmt(sim.tick))
+    + ' · Year ' + year + ' · ' + season + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
+  $('toNow').hidden = !inPast();
+  $('pause').textContent = !paused ? 'Pause' : inPast() ? 'Resume from here' : 'Resume';
 }
 
+// Where a tick sits along the timeline, as a percentage of its width.
+function timelinePercent(tick) {
+  return (tick - windowStart(latestTick)) / windowSpan(latestTick) * 100;
+}
+
+// Event marks, the playhead, and the dimmed stretch after it when viewing the past.
 function refreshMarkers() {
-  const start = windowStart(sim.tick), span = windowSpan(sim.tick);
+  const start = windowStart(latestTick);
   $('markers').innerHTML = sim.events.filter((e) => e.tick >= start).map((e) =>
-    '<span class="marker ' + e.kind + '" style="left:' + ((e.tick - start) / span * 100).toFixed(2) + '%" title="' +
-    e.text + ' (tick ' + fmt(e.tick) + ')"></span>').join('');
+    '<span class="marker ' + e.kind + '" style="left:' + timelinePercent(e.tick).toFixed(2) + '%"></span>').join('');
+  const at = Math.max(0, timelinePercent(sim.tick));
+  $('playhead').style.left = at + '%';
+  $('future').hidden = !inPast();
+  $('future').style.left = at + '%';
+  $('future').style.right = (100 - timelinePercent(latestTick)) + '%';
+}
+
+// The swimmer share lives in the world's settings, so a loaded or rewound
+// world brings its own value back to the slider.
+function refreshSwimSlider() {
+  if (document.activeElement === $('swimShare')) return;
+  const percent = Math.round(sim.params.swimmerShare * 100);
+  $('swimShare').value = percent;
+  $('swimOut').textContent = percent + '%';
 }
 
 function refreshAll() {
+  refreshSwimSlider();
   refreshSpecies();
   refreshInspector();
   refreshEvents();
@@ -285,6 +379,12 @@ function newWorld(seed) {
 function showWorld(savedHistory = []) {
   history = savedHistory;
   worldEdited = true;
+  checkpoints = [];
+  latestTick = sim.tick;
+  checkpoint();
+  cards.clear();
+  flipped.clear();
+  $('cards').textContent = '';
   debt = 0;
   eventsShown = -1;
   select(null);
@@ -303,13 +403,78 @@ function sample() {
   while (history.length > 1 && history[1].tick <= start) history.shift();
 }
 
+// ---------- Rewinding ----------
+
+// Records the whole world at this tick so the timeline can come back to it.
+function checkpoint() {
+  checkpoints = checkpoints.filter((c) => c.tick < sim.tick);
+  checkpoints.push({
+    tick: sim.tick,
+    text: JSON.stringify(sim.save()),
+    foodRate: +$('fRate').value,
+    mutationRate: +$('mut').value,
+  });
+  // Keep one checkpoint at or before the start of the timeline, and drop older ones.
+  const start = windowStart(latestTick);
+  while (checkpoints.length > 1 && checkpoints[1].tick <= start) checkpoints.shift();
+}
+
+// The run is about to change from a point in the past: that point becomes
+// "now", and what used to come after it is dropped.
+function branchHere() {
+  if (!inPast()) return;
+  latestTick = sim.tick;
+  history = history.filter((s) => s.tick <= sim.tick);
+  checkpoints = checkpoints.filter((c) => c.tick <= sim.tick);
+}
+
+// Call after the user changes the world by hand (a brush stroke or a disaster).
+function worldWasEdited() {
+  worldEdited = true;
+  checkpoint();
+}
+
+// Moves the world to `target`, pausing it. With `exact`, replays from the
+// checkpoint before `target` to land on that very tick; without, stops at the
+// checkpoint, which is quick enough to do while the timeline is being dragged.
+function goTo(target, exact) {
+  if (!checkpoints.length) return;
+  // Leaving the present: make sure we can come back to it.
+  if (!inPast() && checkpoints[checkpoints.length - 1].tick !== sim.tick) checkpoint();
+  target = Math.min(latestTick, Math.max(checkpoints[0].tick, Math.round(target)));
+  let from = checkpoints[0];
+  for (const c of checkpoints) if (c.tick <= target) from = c;
+
+  paused = true;
+  debt = 0;
+  // The world can stay as it is if it is already at the checkpoint, or (when
+  // replaying) somewhere between the checkpoint and the target.
+  const reuse = exact ? sim.tick >= from.tick && sim.tick <= target : sim.tick === from.tick;
+  if (reuse && (!exact || sim.tick === target)) {
+    refreshClock();
+    refreshMarkers();
+    return;
+  }
+  if (!reuse) sim.load(JSON.parse(from.text));
+  if (exact) while (sim.tick < target && sim.creatures.length) sim.step(from.foodRate, from.mutationRate);
+
+  eventsShown = -1;
+  select(null);
+  map.paintWorld();
+  map.paintLayer();
+  refreshAll();
+}
+
 function tick() {
+  branchHere();
   for (const c of sim.creatures) {
     c.prevX = c.x;
     c.prevY = c.y;
   }
   sim.step(+$('fRate').value, +$('mut').value);
+  latestTick = sim.tick;
   if (sim.tick % SAMPLE_EVERY === 0) sample();
+  if (sim.tick % CHECKPOINT_EVERY === 0) checkpoint();
 }
 
 function frame() {
@@ -347,6 +512,7 @@ function paint(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
   worldEdited = true;
+  branchHere();
   const radius = brushRadius();
   if (tool === 'food') {
     for (let i = 0; i < 4; i++) {
@@ -382,8 +548,9 @@ function clickMap(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
   if (tool === 'meteor') {
-    worldEdited = true;
+    branchHere();
     sim.meteor(at.x, at.y);
+    worldWasEdited();
     map.paintWorld();
     map.paintLayer();
     refreshAll();
@@ -459,8 +626,10 @@ function pointerEnd(e) {
   pinchMid = null;
   if (pointers.size === 0) {
     canvas.classList.remove('dragging');
-    if (painting) refreshAll();
-    else if (!dragged && e.type === 'pointerup' && e.button === 0) clickMap(p.x, p.y);
+    if (painting) {
+      worldWasEdited(); // one checkpoint per brush stroke
+      refreshAll();
+    } else if (!dragged && e.type === 'pointerup' && e.button === 0) clickMap(p.x, p.y);
     painting = false;
   }
 }
@@ -477,8 +646,62 @@ canvas.addEventListener('wheel', (e) => {
 
 function togglePause() {
   paused = !paused;
-  $('pause').textContent = paused ? 'Resume' : 'Pause';
+  refreshClock();
 }
+
+// ---------- Timeline scrubbing ----------
+
+const timelineBox = $('timelineBox');
+
+function timelinePointer(e) {
+  const rect = timelineBox.getBoundingClientRect();
+  const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const tick = Math.round(windowStart(latestTick) + fraction * windowSpan(latestTick));
+  return { x: fraction * rect.width, width: rect.width, tick: Math.min(latestTick, Math.max(checkpoints[0]?.tick ?? 0, tick)) };
+}
+
+// Shows the tick under the pointer, and any event marked within a few pixels of it.
+function showScrubTip(e) {
+  const at = timelinePointer(e);
+  const ticksPerPixel = windowSpan(latestTick) / at.width;
+  let near = null;
+  for (const event of sim.events) {
+    const gap = Math.abs(event.tick - at.tick);
+    if (gap <= ticksPerPixel * 5 && (!near || gap < Math.abs(near.tick - at.tick))) near = event;
+  }
+  const tip = $('scrubTip'), x = timelinePercent(at.tick) / 100 * at.width;
+  tip.textContent = 'Tick ' + fmt(at.tick) + (near ? ' · ' + near.text : '');
+  tip.hidden = false;
+  tip.style.left = Math.min(at.width - tip.offsetWidth / 2, Math.max(tip.offsetWidth / 2, x)) + 'px';
+  $('scrubLine').hidden = false;
+  $('scrubLine').style.left = x + 'px';
+  return at;
+}
+
+function hideScrubTip() {
+  $('scrubTip').hidden = true;
+  $('scrubLine').hidden = true;
+}
+
+timelineBox.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  try { timelineBox.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+  scrubbing = true;
+  goTo(showScrubTip(e).tick, false);
+});
+timelineBox.addEventListener('pointermove', (e) => {
+  const at = showScrubTip(e);
+  if (scrubbing) goTo(at.tick, false);
+});
+function scrubEnd(e) {
+  if (!scrubbing) return;
+  scrubbing = false;
+  goTo(timelinePointer(e).tick, true); // land on the exact tick
+  if (e.pointerType !== 'mouse') hideScrubTip();
+}
+timelineBox.addEventListener('pointerup', scrubEnd);
+timelineBox.addEventListener('pointercancel', scrubEnd);
+timelineBox.addEventListener('pointerleave', () => { if (!scrubbing) hideScrubTip(); });
 
 // ---------- Saving ----------
 // Worlds are stored by the server in a SQLite file. The current run is
@@ -492,7 +715,8 @@ function setSaveStatus(text) {
 const snapshot = () => ({ sim: sim.save(), history });
 
 async function autosave() {
-  if (savingNow || (sim.tick === autosavedTick && !worldEdited)) return;
+  // While looking at the past, leave the autosave at the present.
+  if (savingNow || inPast() || (sim.tick === autosavedTick && !worldEdited)) return;
   savingNow = true;
   const tick = sim.tick;
   try {
@@ -615,8 +839,15 @@ function loadSeed() {
 
 $('fRate').oninput = (e) => ($('fOut').textContent = (+e.target.value).toFixed(1));
 $('mut').oninput = (e) => ($('mutOut').textContent = (+e.target.value).toFixed(1));
+$('swimShare').oninput = (e) => {
+  sim.params.swimmerShare = +e.target.value / 100;
+  $('swimOut').textContent = e.target.value + '%';
+  worldEdited = true;
+};
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
-const disaster = (strike) => () => { strike(); worldEdited = true; refreshAll(); };
+const disaster = (strike) => () => { branchHere(); strike(); worldWasEdited(); refreshAll(); };
+$('toNow').onclick = () => goTo(latestTick, true);
+$('collapseAll').onclick = () => setAllCollapsed(!allCollapsed);
 $('heat').onclick = disaster(sim.heatWave);
 $('cold').onclick = disaster(sim.coldSnap);
 $('drought').onclick = disaster(sim.drought);
@@ -672,4 +903,5 @@ new ResizeObserver(() => map.resize()).observe($('map'));
 map.resize();
 camera.fill();
 setLayer('none');
+setAllCollapsed(allCollapsed);
 start();

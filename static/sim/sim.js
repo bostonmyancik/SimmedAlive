@@ -32,8 +32,11 @@ const PAINT_KINDS = { plain: PLAIN, fertile: FERTILE, desert: DESERT, mountain: 
 const SAVE_VERSION = 1;
 const CREATURE_FIELDS = [
   'id', 'parentId', 'species', 'x', 'y', 'heading', 'energy', 'hydration', 'thirsty', 'age',
-  'bornTick', 'generation', 'offspring', ...TRAITS,
+  'bornTick', 'generation', 'offspring', ...TRAITS, 'swimmer', 'detour', 'blocked', 'slide',
 ];
+
+// Turns (in radians) a blocked creature tries, gentlest first, to slide past an obstacle.
+const SLIDE_TURNS = [0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45, 2.8];
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -57,8 +60,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
     waterDistance: new Float32Array(GRID_W * GRID_H), // cells to walk to water
     temperature: new Float32Array(GRID_W * GRID_H),
     tempOffset: new Float32Array(GRID_W * GRID_H),    // warming or cooling from brushes and meteors
-    food: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE),     // plants: { x, y }
-    carcasses: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE), // meat: { x, y, tick }
+    // `wet` marks plants and carcasses lying in water, which only swimmers go for.
+    food: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE),     // plants: { x, y, wet }
+    carcasses: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE), // meat: { x, y, tick, wet }
     creatures: [],
     fronts: [],
     events: [],          // the event log: { tick, kind, species, text }
@@ -158,7 +162,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
           x = random() * WIDTH;
           y = clamp((latitude + (random() - 0.5) * 0.26) * HEIGHT, 0, HEIGHT - 1);
         } while (!habitable(cellIndex(x, y)) && tries++ < 50);
-        sim.creatures.push(spawnCreature(nextCreatureId++, id, founder, x, y, random));
+        sim.creatures.push(spawnCreature(nextCreatureId++, id, founder, x, y, P.swimmerShare, random));
       }
     });
     countSpecies();
@@ -180,20 +184,25 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
   // ---------- Food ----------
 
-  // Places a plant unless the spot is water or mountain. Returns whether it landed.
+  // Places a plant unless the spot is a mountain. Returns whether it landed.
   function addFood(x, y) {
-    if (sim.blocked[cellIndex(x, y)]) return false;
-    sim.food.add({ x, y });
+    const cell = cellIndex(x, y);
+    if (sim.terrain[cell] === MOUNTAIN) return false;
+    sim.food.add({ x, y, wet: sim.water[cell] === 1 });
     return true;
   }
 
   // Chance (0 to 1) that a plant sprouting in a cell takes hold: best on
   // fertile land near water, poor in desert and in extreme cold or heat.
+  // Water grows a few plants of its own.
   function fertility(cell) {
-    if (sim.blocked[cell]) return 0;
     const temp = sim.temperature[cell];
-    const nearWater = 0.2 + 0.8 * Math.exp(-sim.waterDistance[cell] / 5);
     const climate = temp < -4 || temp > 40 ? 0.15 : 1;
+    if (sim.water[cell]) return RULES.waterFertility * climate;
+    if (sim.terrain[cell] === MOUNTAIN) return 0;
+    // Land walled off from all water supports nothing, so no plants pile up there.
+    if (sim.waterDistance[cell] > 1e8) return 0;
+    const nearWater = 0.2 + 0.8 * Math.exp(-sim.waterDistance[cell] / 5);
     return Math.min(1, TERRAIN_FERTILITY[sim.terrain[cell]] * nearWater * climate);
   }
 
@@ -203,7 +212,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
     while (budget > 0) {
       if (random() < budget && sim.food.size < RULES.maxFood) {
         const x = random() * WIDTH, y = random() * HEIGHT;
-        if (random() < fertility(cellIndex(x, y))) sim.food.add({ x, y });
+        // A patch that is already crowded grows no more. This keeps plants
+        // nobody can reach from piling up and using the whole world's allowance.
+        if (random() < fertility(cellIndex(x, y)) && sim.food.bucketAt(x, y).length < RULES.maxFoodNearby) addFood(x, y);
       }
       budget -= 1;
     }
@@ -243,15 +254,24 @@ export function createSim({ seed = 1, params = {} } = {}) {
   };
 
   // Call after the map changes: updates what blocks movement and the routes
-  // to water, and clears plants and carcasses off water and mountains.
+  // to water, clears plants and carcasses off mountains, and notes which of
+  // the rest are now in water.
   function terrainChanged() {
     rebuildBlocked();
     computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
-    for (const plant of [...sim.food]) if (sim.blocked[cellIndex(plant.x, plant.y)]) sim.food.remove(plant);
+    for (const plant of [...sim.food]) {
+      const cell = cellIndex(plant.x, plant.y);
+      if (sim.terrain[cell] === MOUNTAIN) sim.food.remove(plant);
+      else plant.wet = sim.water[cell] === 1;
+    }
     for (const carcass of [...sim.carcasses]) {
-      if (!sim.blocked[cellIndex(carcass.x, carcass.y)]) continue;
-      sim.carcasses.remove(carcass);
-      carcass.eaten = true;
+      const cell = cellIndex(carcass.x, carcass.y);
+      if (sim.terrain[cell] === MOUNTAIN) {
+        sim.carcasses.remove(carcass);
+        carcass.eaten = true;
+      } else {
+        carcass.wet = sim.water[cell] === 1;
+      }
     }
   }
 
@@ -369,13 +389,18 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.creatures = data.creatures.map((values) => {
       const c = {};
       CREATURE_FIELDS.forEach((field, i) => { c[field] = values[i]; });
+      c.swimmer = !!c.swimmer; // saves from before swimming existed
+      c.detour = c.detour || 0;
+      c.blocked = c.blocked || 0;
+      c.slide = c.slide ?? null;
       return c;
     });
 
     sim.food.clear();
-    for (const [x, y] of data.food) sim.food.add({ x, y });
+    const wet = (x, y) => sim.water[cellIndex(x, y)] === 1;
+    for (const [x, y] of data.food) sim.food.add({ x, y, wet: wet(x, y) });
     sim.carcasses.clear();
-    carcassQueue = data.carcasses.map(([x, y, tick]) => ({ x, y, tick, eaten: false }));
+    carcassQueue = data.carcasses.map(([x, y, tick]) => ({ x, y, tick, eaten: false, wet: wet(x, y) }));
     for (const carcass of carcassQueue) sim.carcasses.add(carcass);
     carcassQueue.sort((a, b) => a.tick - b.tick);
   }
@@ -505,6 +530,49 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }
   }
 
+  const onDryLand = (item) => !item.wet;
+
+  // Points a creature that is in the water but cannot swim at the nearest dry
+  // land, searching outward a ring of cells at a time.
+  function headTowardLand(c, cell) {
+    const gx = cell % GRID_W, gy = (cell / GRID_W) | 0;
+    for (let ring = 1; ring <= 10; ring++) {
+      for (let ay = -ring; ay <= ring; ay++) {
+        const ny = gy + ay;
+        if (ny < 0 || ny >= GRID_H) continue;
+        // Only the cells on the edge of the ring are new.
+        const stride = Math.abs(ay) === ring ? 1 : 2 * ring;
+        for (let ax = -ring; ax <= ring; ax += stride) {
+          if (sim.blocked[ny * GRID_W + (gx + ax + GRID_W) % GRID_W]) continue;
+          c.heading = Math.atan2(ay, ax);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Whether a creature standing in cell `from` may step into cell `to`.
+  // A creature that finds itself somewhere it could not have walked to (born
+  // to a swimming parent in mid-lake, or painted over) is allowed to leave.
+  function canEnter(c, from, to) {
+    if (sim.terrain[to] === MOUNTAIN) return sim.terrain[from] === MOUNTAIN;
+    if (sim.water[to]) return c.swimmer || sim.water[from] === 1;
+    return true;
+  }
+
+  // Moves a creature one step in `heading` if nothing is in the way.
+  function stepAlong(c, cell, heading, distance) {
+    const nx = (c.x + Math.cos(heading) * distance + WIDTH) % WIDTH;
+    const ny = c.y + Math.sin(heading) * distance;
+    if (ny < 0 || ny >= HEIGHT || !canEnter(c, cell, cellIndex(nx, ny))) return false;
+    const oldX = c.x, oldY = c.y;
+    c.x = nx;
+    c.y = ny;
+    creatureGrid.move(c, oldX, oldY);
+    return true;
+  }
+
   // Fight, decide where to go, move, pay upkeep, breed.
   function act(c, born, mutationRate) {
     const cell = cellIndex(c.x, c.y);
@@ -521,8 +589,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // creature's diet gets out of it against how far away it is.
     const plantWorth = RULES.foodEnergy * (1 - c.diet);
     const meatWorth = RULES.carcassEnergy * c.diet;
-    const plant = plantWorth > 0 ? sim.food.nearest(c.x, c.y, visionSq) : null;
-    const carcass = meatWorth > 0 ? sim.carcasses.nearest(c.x, c.y, visionSq) : null;
+    // Only swimmers go for what is lying in water; the rest would just pace the shore.
+    const reachable = c.swimmer ? undefined : onDryLand;
+    const plant = plantWorth > 0 ? sim.food.nearest(c.x, c.y, visionSq, reachable) : null;
+    const carcass = meatWorth > 0 ? sim.carcasses.nearest(c.x, c.y, visionSq, reachable) : null;
     const appeal = (item, worth) => (item ? worth / (Math.sqrt(distSqTo(item)) + 20) : 0);
     const meal = appeal(carcass, meatWorth) > appeal(plant, plantWorth) ? carcass : plant;
     const mealDistSq = meal ? distSqTo(meal) : visionSq;
@@ -538,8 +608,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (c.hydration < RULES.thirstyBelow) c.thirsty = true;
     if (c.hydration >= RULES.quenchedAt) c.thirsty = false;
 
-    // Decide where to go. The first rule that applies wins.
-    let move = c.speed;
+    // Decide where to go. The first rule that applies wins. While on a detour
+    // round an obstacle the creature still eats and drinks what it reaches,
+    // but keeps its course rather than turning back toward what it was after.
+    const course = c.heading;
+    const swimming = sim.water[cell] === 1;
+    let move = c.speed * (swimming ? RULES.swimSpeedFactor : 1);
     const mustFlee = enemy
       && enemy.strength > c.strength * RULES.fleeStrengthRatio
       && enemyDistSq < P.fleeDistance * P.fleeDistance;
@@ -549,7 +623,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
       && c.energy < P.huntEnergy * 2 * c.diet
       && (!meal || enemyDistSq < mealDistSq);
 
-    if (mustFlee) {
+    if (swimming && !c.swimmer && headTowardLand(c, cell)) {
+      // Out of its depth: make for the shore before anything else.
+    } else if (mustFlee) {
       c.heading = Math.atan2(c.y - enemy.y, c.x - enemy.x);
     } else if (c.thirsty) {
       if (sim.waterDistance[cell] <= 1) {
@@ -571,6 +647,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
           sim.food.remove(meal);
           c.energy += plantWorth;
         }
+        // Got what it was after: no need to keep working round anything.
+        c.blocked = 0;
+        c.slide = null;
+        c.detour = 0;
       }
     } else if (stress > 0) {
       headTowardComfort(c);
@@ -578,23 +658,43 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.heading += (random() - 0.5) * 0.5; // wander
     }
 
-    // Move, turning away from water, mountains and the north and south edges.
+    if (c.detour > 0) {
+      c.detour--;
+      c.heading = course;
+    }
+
+    // Move. Mountains, the north and south edges and (unless it can swim)
+    // water are in the way; a blocked creature slides along the obstacle.
     if (move) {
-      const nx = (c.x + Math.cos(c.heading) * move + WIDTH) % WIDTH;
-      const ny = c.y + Math.sin(c.heading) * move;
-      if (ny < 0 || ny >= HEIGHT || sim.blocked[cellIndex(nx, ny)]) {
-        c.heading += 1.5 + random();
-      } else {
-        const oldX = c.x, oldY = c.y;
-        c.x = nx;
-        c.y = ny;
-        creatureGrid.move(c, oldX, oldY);
+      let moved = stepAlong(c, cell, c.heading, move);
+      if (!moved) {
+        // Take the gentlest turn that is open. If it is already working its
+        // way along this obstacle, try the side it was going first, so it
+        // follows the edge round instead of doubling back.
+        const side = c.slide === null ? (random() < 0.5 ? 1 : -1) : Math.sin(c.slide - c.heading) >= 0 ? 1 : -1;
+        search: for (const way of [side, -side]) {
+          for (const turn of SLIDE_TURNS) {
+            const heading = c.heading + way * turn;
+            if (!stepAlong(c, cell, heading, move)) continue;
+            c.heading = heading;
+            c.slide = heading;
+            moved = true;
+            break search;
+          }
+        }
+        // Hold the new course for a while, longer each time it happens again.
+        c.blocked = Math.min(RULES.maxDetourRepeats, c.blocked + 1);
+        c.detour = RULES.detourTicks * c.blocked + Math.floor(random() * RULES.detourTicks);
+        if (!moved) c.heading += 1.5 + random(); // boxed in: turn and try again next tick
       }
     }
+    // Being blocked is forgotten bit by bit.
+    if (c.blocked && c.age % RULES.detourForgetTicks === 0 && --c.blocked === 0) c.slide = null;
 
     // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost energy.
     c.energy -= 0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
-      + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress;
+      + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress
+      + (swimming ? RULES.swimCost : 0);
     c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12)
       * (inDrought() ? RULES.droughtThirstFactor : 1);
     c.age++;
@@ -604,7 +704,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (c.energy > RULES.breedEnergy && stress <= P.maxBreedingStress && roomLeft) {
       c.energy /= 2;
       c.offspring++;
-      const child = makeOffspring(nextCreatureId++, c, sim.tick, mutationRate, P.tempMutationScale, random);
+      const child = makeOffspring(nextCreatureId++, c, sim.tick, mutationRate, P, random);
       assignSpecies(child);
       born.push(child);
     }
@@ -645,7 +745,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       if (c.energy > 0 && c.hydration > 0 && c.age < RULES.maxAge) {
         survivors.push(c);
       } else {
-        const carcass = { x: c.x, y: c.y, tick: sim.tick, eaten: false };
+        const carcass = { x: c.x, y: c.y, tick: sim.tick, eaten: false, wet: sim.water[cellIndex(c.x, c.y)] === 1 };
         sim.carcasses.add(carcass);
         carcassQueue.push(carcass);
       }
@@ -655,18 +755,20 @@ export function createSim({ seed = 1, params = {} } = {}) {
     countSpecies();
   }
 
-  // Average traits and highest generation for every species, indexed like
+  // Average traits, share of swimmers and highest generation for every species, indexed like
   // sim.species. (Head counts and kills are on the species records.)
   function stats() {
-    const out = sim.species.map(() => ({ speed: 0, vision: 0, strength: 0, preferredTemp: 0, diet: 0, maxGeneration: 0 }));
+    const out = sim.species.map(() => ({ speed: 0, vision: 0, strength: 0, preferredTemp: 0, diet: 0, swimmers: 0, maxGeneration: 0 }));
     for (const c of sim.creatures) {
       const s = out[c.species];
       for (const trait of TRAITS) s[trait] += c[trait];
+      if (c.swimmer) s.swimmers++;
       if (c.generation > s.maxGeneration) s.maxGeneration = c.generation;
     }
     out.forEach((s, id) => {
       const n = sim.species[id].count || 1;
       for (const trait of TRAITS) s[trait] /= n;
+      s.swimmers /= n; // the share of the species that can swim
     });
     return out;
   }

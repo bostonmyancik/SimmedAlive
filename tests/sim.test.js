@@ -44,7 +44,7 @@ function creature(overrides) {
   return {
     id: nextId++, parentId: null, species: 1, x: 0, y: 0, heading: 0, energy: 60, hydration: 90,
     thirsty: false, age: 0, bornTick: 0, generation: 1, offspring: 0,
-    speed: 1.7, vision: 30, strength: 1.3, preferredTemp: 18, diet: 0,
+    speed: 1.7, vision: 30, strength: 1.3, preferredTemp: 18, diet: 0, swimmer: false, detour: 0, blocked: 0, slide: null,
     ...overrides,
   };
 }
@@ -67,8 +67,13 @@ test('a new world starts with every founding species on walkable land', () => {
   const sim = run(3, 0);
   assert.equal(sim.species.length, SPECIES.length);
   sim.species.forEach((sp, i) => assert.equal(sp.count, SPECIES[i].startCount ?? RULES.startPerSpecies));
-  for (const f of sim.food) assert.equal(sim.blocked[cellIndex(f.x, f.y)], 0);
+  for (const f of sim.food) {
+    assert.notEqual(sim.terrain[cellIndex(f.x, f.y)], MOUNTAIN);
+    assert.equal(f.wet, sim.water[cellIndex(f.x, f.y)] === 1);
+  }
   for (const c of sim.creatures) assert.equal(sim.blocked[cellIndex(c.x, c.y)], 0);
+  const swimmers = sim.creatures.filter((c) => c.swimmer).length / sim.creatures.length;
+  assert.ok(swimmers > 0.1 && swimmers < 0.3, 'about a fifth should be able to swim');
 });
 
 test('the world has every kind of terrain, and water and mountains are blocked', () => {
@@ -78,13 +83,20 @@ test('the world has every kind of terrain, and water and mountains are blocked',
   assert.equal(sim.fertility(sim.terrain.indexOf(MOUNTAIN)), 0);
 });
 
-test('the ecosystem keeps going: creatures breed and stay on walkable land', () => {
+test('the ecosystem keeps going: creatures breed, stay off mountains, and only swimmers enter water', () => {
   const sim = createSim({ seed: 42 });
   sim.generate();
   for (let i = 0; i < 4000; i++) { // longer than one lifespan, so survivors were born in the sim
     sim.step(1, 0.4);
-    if (i % 100 === 0) for (const c of sim.creatures) assert.equal(sim.blocked[cellIndex(c.x, c.y)], 0);
+    if (i % 100 !== 0) continue;
+    for (const c of sim.creatures) {
+      const cell = cellIndex(c.x, c.y);
+      assert.notEqual(sim.terrain[cell], MOUNTAIN);
+      // A non-swimmer can only be in water if it was born there, moments ago.
+      if (sim.water[cell] && !c.swimmer) assert.ok(c.age < 400, 'a non-swimmer is living in the water');
+    }
   }
+  assert.ok(sim.creatures.some((c) => c.swimmer) && sim.creatures.some((c) => !c.swimmer));
   assert.ok(sim.creatures.length > 100, 'the population collapsed');
   assert.ok(sim.species.slice(0, SPECIES.length).filter((sp) => sp.count > 0).length >= 2, 'founders died out');
   for (const c of sim.creatures) {
@@ -128,12 +140,79 @@ test('a meat-eater gets nothing from plants and leaves them alone', () => {
   assert.ok(c.energy < 60);
 });
 
-test('food cannot be dropped in water or on mountains', () => {
+test('food can be dropped in water but not on mountains', () => {
   const sim = emptyWorld();
-  for (const i of [sim.water.indexOf(1), sim.terrain.indexOf(MOUNTAIN)]) {
-    assert.equal(sim.addFood((i % GRID_W) * CELL + 5, Math.floor(i / GRID_W) * CELL + 5), false);
+  const spotOf = (i) => [(i % GRID_W) * CELL + 5, Math.floor(i / GRID_W) * CELL + 5];
+  assert.equal(sim.addFood(...spotOf(sim.terrain.indexOf(MOUNTAIN))), false);
+  assert.equal(sim.addFood(...spotOf(sim.water.indexOf(1))), true);
+  assert.deepEqual([...sim.food].map((f) => f.wet), [true]);
+});
+
+// A lake cell with open water to its east, and the dry cell on its west shore.
+function findShore(sim) {
+  for (let i = 1; i < sim.water.length - 3; i++) {
+    const row = Math.floor(i / GRID_W);
+    if (!sim.blocked[i - 1] && sim.water[i] && sim.water[i + 1] && sim.water[i + 2] && Math.floor((i + 2) / GRID_W) === row
+        && Math.floor((i - 1) / GRID_W) === row) {
+      return { land: { x: ((i - 1) % GRID_W) * CELL + 5, y: row * CELL + 5 }, water: { x: (i % GRID_W) * CELL + 15, y: row * CELL + 5 } };
+    }
   }
-  assert.equal(sim.food.size, 0);
+  throw new Error('no shore in this world');
+}
+
+test('only a swimmer goes into the water for food', () => {
+  const attempt = (swimmer) => {
+    const sim = emptyWorld();
+    const shore = findShore(sim);
+    const c = creature({ ...shore.land, swimmer, vision: 40, preferredTemp: sim.temperature[cellIndex(shore.land.x, shore.land.y)] });
+    sim.creatures = [c];
+    sim.addFood(shore.water.x, shore.water.y);
+    let wasInWater = false;
+    for (let i = 0; i < 40 && sim.food.size; i++) {
+      sim.step(0, 0);
+      wasInWater = wasInWater || sim.water[cellIndex(c.x, c.y)] === 1;
+    }
+    return { ate: sim.food.size === 0, wasInWater };
+  };
+  assert.deepEqual(attempt(true), { ate: true, wasInWater: true });
+  assert.deepEqual(attempt(false), { ate: false, wasInWater: false });
+});
+
+test('swimming is slower than walking and costs energy', () => {
+  const sim = emptyWorld();
+  const shore = findShore(sim);
+  const temp = sim.temperature[cellIndex(shore.water.x, shore.water.y)];
+  const inWater = creature({ ...shore.water, swimmer: true, heading: 0, preferredTemp: temp, hydration: 96 });
+  const onLand = creature({ ...findCell(sim, inlandMild), heading: 0, hydration: 96 });
+  onLand.preferredTemp = sim.temperature[cellIndex(onLand.x, onLand.y)];
+  sim.creatures = [inWater, onLand];
+  const startX = [inWater.x, onLand.x];
+  sim.step(0, 0);
+  const moved = [Math.abs(inWater.x - startX[0]), Math.abs(onLand.x - startX[1])];
+  assert.ok(moved[0] > 0 && moved[0] < moved[1] * 0.75, 'moved ' + moved);
+  assert.ok(inWater.energy < onLand.energy);
+});
+
+test('a non-swimmer that ends up in the water can walk out', () => {
+  const sim = emptyWorld();
+  const shore = findShore(sim);
+  const c = creature({ ...shore.water, swimmer: false, heading: Math.PI, hydration: 96 });
+  sim.creatures = [c];
+  for (let i = 0; i < 30; i++) sim.step(0, 0);
+  assert.equal(sim.water[cellIndex(c.x, c.y)], 0);
+});
+
+test('newborns can swim according to the swimmer share, whatever their parent does', () => {
+  for (const share of [0, 1]) {
+    const sim = createSim({ seed: 7, params: { swimmerShare: share } });
+    sim.generate();
+    assert.ok(sim.creatures.every((c) => c.swimmer === (share === 1)));
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    sim.creatures = [creature({ ...spot, swimmer: share === 0, energy: 150, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] })];
+    sim.step(0, 0);
+    assert.equal(sim.creatures[1].swimmer, share === 1);
+  }
 });
 
 // Leaves one carcass at `spot` by letting a creature starve there.
@@ -359,16 +438,18 @@ test('painting water blocks the spot, and painting land opens it again', () => {
   assert.equal(sim.water[cell], 1);
   assert.equal(sim.blocked[cell], 1);
   assert.equal(sim.waterDistance[cell], 0);
-  assert.equal(sim.food.size, 0, 'plants under the new water should go');
+  assert.deepEqual([...sim.food].map((f) => f.wet), [true], 'the plant is now in water');
 
   sim.paintTerrain(spot.x, spot.y, 25, 'fertile');
   assert.equal(sim.water[cell], 0);
   assert.equal(sim.terrain[cell], FERTILE);
   assert.equal(sim.blocked[cell], 0);
   assert.ok(sim.waterDistance[cell] > 0);
+  assert.deepEqual([...sim.food].map((f) => f.wet), [false]);
 
   sim.paintTerrain(spot.x, spot.y, 25, 'mountain');
   assert.equal(sim.blocked[cell], 1);
+  assert.equal(sim.food.size, 0, 'plants under the new mountain should go');
   assert.throws(() => sim.paintTerrain(spot.x, spot.y, 25, 'lava'));
 });
 
@@ -469,4 +550,45 @@ test('loading rejects a save from another version', () => {
   const sim = run(1, 0);
   assert.throws(() => sim.load({ ...sim.save(), version: 99 }));
   assert.throws(() => sim.load(null));
+});
+
+// ---------- Getting stuck ----------
+
+test('a creature gets round a wall to reach food instead of pacing in front of it', () => {
+  // A wide temperature tolerance keeps passing weather out of this test.
+  const sim = createSim({ seed: 7, params: { tempTolerance: 100 } });
+  sim.generate();
+  sim.creatures = [];
+  const spot = findCell(sim, (d, temp) => d > 8 && d < 1e8 && Math.abs(temp - 18) < 4); // mid-map, clear of the edges
+  // A mountain wall 70 pixels long between the creature and a plant.
+  for (let dy = -30; dy <= 30; dy += 10) sim.paintTerrain(spot.x + 20, spot.y + dy, 4, 'mountain');
+  sim.food.clear();
+  const c = creature({ ...spot, vision: 90, energy: 100 });
+  sim.creatures = [c];
+  assert.ok(sim.addFood(spot.x + 40, spot.y));
+  for (let i = 0; i < 300 && sim.food.size; i++) sim.step(0, 0);
+  assert.equal(sim.food.size, 0, 'the plant behind the wall was never reached');
+  assert.deepEqual([c.blocked, c.slide, c.detour], [0, null, 0], 'it should stop detouring once it has eaten');
+});
+
+test('creatures caught under newly painted water or mountains get out', () => {
+  for (const kind of ['water', 'mountain']) {
+    const sim = createSim({ seed: 7, params: { tempTolerance: 100 } });
+    sim.generate();
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    sim.creatures = Array.from({ length: 12 }, (_, i) =>
+      creature({ x: spot.x + (i % 4) * 6 - 9, y: spot.y + Math.floor(i / 4) * 6 - 6, heading: i, energy: 100 }));
+    sim.paintTerrain(spot.x, spot.y, 50, kind);
+    for (let i = 0; i < 120; i++) sim.step(0, 0);
+    assert.equal(sim.creatures.length, 12);
+    for (const c of sim.creatures) assert.equal(sim.blocked[cellIndex(c.x, c.y)], 0, 'still stuck in ' + kind);
+  }
+});
+
+test('plants do not pile up where nothing eats them', () => {
+  const sim = emptyWorld();
+  for (let i = 0; i < 4000; i++) sim.step(2, 0);
+  for (const bucket of sim.food.buckets) assert.ok(bucket.length <= RULES.maxFoodNearby);
+  for (const f of sim.food) assert.ok(sim.waterDistance[cellIndex(f.x, f.y)] < 1e8, 'a plant grew on land cut off from water');
 });

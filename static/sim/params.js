@@ -34,6 +34,9 @@ export const DEFAULT_PARAMS = {
   maxBreedingStress: 0,    // most stress at which a creature can still reproduce
   tempMutationScale: 2,    // how fast preferred temperature mutates
 
+  // Swimming
+  swimmerShare: 0.2,       // chance that a creature is born able to swim
+
   // Speciation
   speciationDistance: 1.6, // how far traits must drift from a species' founder to split off
 };
@@ -48,6 +51,7 @@ export const RULES = {
 
   startPerSpecies: 100,
   startFood: 600,
+  maxFoodNearby: 10,           // plants stop sprouting where this many already crowd one patch of ground
   maxFood: 1800,               // natural growth stops here (dropped food can exceed it)
   maxCreatures: 1800,
   maxAge: 3000,
@@ -80,8 +84,19 @@ export const RULES = {
   visionMutationScale: 25,
   dietMutationScale: 0.15,
 
-  // How readily food grows on each kind of land (water and mountains grow none).
+  // How readily food grows on each kind of land (mountains grow none).
   terrainFertility: { plain: 0.8, fertile: 1.6, desert: 0.15 },
+  waterFertility: 0.25,        // water plants, which only swimmers can reach
+
+  // Swimming. Swimmers cross water; everyone else has to go around.
+  swimSpeedFactor: 0.6,        // speed in water, as a share of speed on land
+  swimCost: 0.05,              // extra energy per tick spent in water
+
+  // Getting around obstacles. A blocked creature slides along the obstacle and
+  // then keeps to that course for a while instead of turning straight back.
+  detourTicks: 10,             // shortest detour; each repeat block in a row adds this much again
+  maxDetourRepeats: 3,
+  detourForgetTicks: 80,       // ticks for one repeat to be forgotten
 
   // Speciation. A trait difference of one "scale" counts as a distance of 1.
   traitScales: { speed: 1, vision: 25, strength: 1, preferredTemp: 8, diet: 0.35 },

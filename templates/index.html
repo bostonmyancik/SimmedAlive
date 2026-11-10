@@ -104,12 +104,23 @@
   .panel h2:first-child { margin-top: 0; }
   .hint { color: var(--text-secondary); font-size: 13px; margin: 0 0 10px; }
 
-  .card { background: var(--surface); border-radius: 10px; padding: 11px 14px; margin-bottom: 10px; }
-  .card .name { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; }
-  .card .count { font-size: 26px; font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; }
-  .card .share { height: 4px; border-radius: 2px; background: var(--border); margin: 6px 0 8px; overflow: hidden; }
+  .cardsbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); }
+  .cardsbar button { padding: 3px 10px; font-size: 12px; }
+  .card { background: var(--surface); border-radius: 10px; padding: 9px 12px 10px; margin-bottom: 8px; }
+  .cardhead {
+    display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 0;
+    background: none; text-align: left;
+  }
+  .cardhead:hover { background: none; }
+  .cardhead:active { transform: none; }
+  .card .name { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .count { font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .card .chev { width: 14px; height: 14px; flex: none; color: var(--text-muted); transition: transform 0.12s; }
+  .card.collapsed .chev { transform: rotate(-90deg); }
+  .card .share { height: 4px; border-radius: 2px; background: var(--border); margin-top: 7px; overflow: hidden; }
   .card .share i { display: block; height: 100%; border-radius: 2px; }
-  .card.extinct .count { color: var(--text-muted); }
+  .card .facts { margin-top: 9px; }
+  .card.collapsed .facts { display: none; }
   .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; margin: 0; }
   .facts dt { color: var(--text-secondary); }
   .facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
@@ -162,19 +173,34 @@
   /* Bottom bar */
   .bar {
     grid-area: bar; background: var(--panel); border-top: 1px solid var(--border);
-    display: flex; align-items: center; gap: 14px; padding: 8px 12px; position: relative; z-index: 2;
+    padding: 8px 12px; position: relative; z-index: 2;
   }
+  .controls { display: flex; align-items: center; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+  .controls .tip { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  #toNow { border-color: var(--accent); }
   #pause { min-width: 78px; }
   .speed { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
   .speed input { width: 110px; }
   .speed output { min-width: 36px; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
   #clock { font-size: 13px; color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .timeline { flex: 1; min-width: 80px; height: 26px; position: relative; border-radius: 6px; overflow: hidden; }
-  #timeline { display: block; width: 100%; height: 100%; }
+  /* The timeline: bands over a 14px strip of tick labels. Drag it to rewind. */
+  .timeline { height: 64px; position: relative; cursor: ew-resize; touch-action: none; user-select: none; }
+  #timeline { display: block; width: 100%; height: 100%; border-radius: 6px; }
   .marker {
-    position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4px; cursor: help;
+    position: absolute; top: 0; bottom: 14px; width: 9px; margin-left: -4px; pointer-events: none;
     display: flex; justify-content: center;
   }
+  #future { position: absolute; top: 0; bottom: 14px; right: 0; background: var(--panel); opacity: 0.6; pointer-events: none; }
+  #playhead { position: absolute; top: -3px; bottom: 11px; width: 2px; margin-left: -1px; background: var(--text); pointer-events: none; }
+  #playhead::before {
+    content: ""; position: absolute; top: -2px; left: -4px; border: 5px solid transparent; border-top-color: var(--text);
+  }
+  #scrubLine { position: absolute; top: 0; bottom: 14px; width: 1px; background: var(--text); opacity: 0.5; pointer-events: none; }
+  #scrubTip {
+    position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+    background: var(--text); color: var(--bg); font-size: 12px; padding: 3px 8px; border-radius: 6px;
+  }
+  #scrubLine[hidden], #scrubTip[hidden], #future[hidden] { display: none; }
   .marker::before { content: ""; width: 3px; height: 100%; background: var(--text); border-radius: 1px; }
   .marker.heat::before { background: #e24b4a; }
   .marker.cold::before { background: #378add; }
@@ -206,9 +232,10 @@
     .sidebar:not(.open) .panel { display: none; }
     .sidebar:not(.open) .tabs { border-bottom: 0; }
     .zoom, .legend { bottom: 72px; }
-    .bar { flex-wrap: wrap; gap: 8px 12px; }
+    .controls { gap: 8px 12px; }
+    .controls .tip { display: none; }
     .speed input { width: 80px; }
-    .timeline { flex-basis: 100%; height: 18px; }
+    .timeline { height: 48px; }
   }
 </style>
 </head>
@@ -283,8 +310,9 @@
     </div>
 
     <div class="panel" id="tab-species" role="tabpanel">
+      <div class="cardsbar"><span id="speciesSummary"></span><button id="collapseAll">Collapse all</button></div>
       <div id="cards"></div>
-      <p class="hint">Bigger body means stronger. A blue ring means thirsty. Crosses are carcasses, which meat-eaters feed on.</p>
+      <p class="hint">Bigger body means stronger. A blue ring means thirsty. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
       <p class="hint" id="extinctList"></p>
     </div>
 
@@ -303,6 +331,7 @@
           <dt>Vision</dt><dd id="inspVision"></dd>
           <dt>Strength</dt><dd id="inspStrength"></dd>
           <dt>Diet</dt><dd id="inspDiet"></dd>
+          <dt>Can swim</dt><dd id="inspSwims"></dd>
           <dt>Prefers</dt><dd id="inspPrefers"></dd>
           <dt>Temperature here</dt><dd id="inspHere"></dd>
           <dt>Born</dt><dd id="inspBorn"></dd>
@@ -326,6 +355,7 @@
         <option value="strength">Average strength</option>
         <option value="preferredTemp">Average preferred temperature</option>
         <option value="diet">Average share of meat in diet</option>
+        <option value="swimmers">Share that can swim</option>
       </select>
       <canvas id="hist"></canvas>
       <div class="key" id="chartKey"></div>
@@ -343,6 +373,8 @@
       <h2>Environment</h2>
       <div class="field"><div class="row"><label for="fRate">Food supply</label><output id="fOut">1.0</output></div><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"></div>
       <div class="field"><div class="row"><label for="mut">Mutation rate</label><output id="mutOut">0.4</output></div><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"></div>
+      <div class="field"><div class="row"><label for="swimShare">Born able to swim</label><output id="swimOut">20%</output></div><input type="range" id="swimShare" min="0" max="100" step="5" value="20"></div>
+      <p class="hint">Swimmers cross water and reach the plants growing in it. Everyone else has to go around.</p>
       <h2>Disasters</h2>
       <div class="buttons">
         <button id="heat">Heat wave</button>
@@ -369,10 +401,21 @@
   </aside>
 
   <footer class="bar">
-    <button id="pause" title="Pause or resume (Space)">Pause</button>
-    <div class="speed"><label for="spd">Speed</label><input type="range" id="spd" min="0" max="6" step="1" value="4"><output id="spdOut">4x</output></div>
-    <div id="clock"></div>
-    <div class="timeline" aria-label="Population timeline"><canvas id="timeline"></canvas><div id="markers"></div></div>
+    <div class="timeline" id="timelineBox" aria-label="Population timeline. Drag to rewind.">
+      <canvas id="timeline"></canvas>
+      <div id="markers"></div>
+      <div id="future" hidden></div>
+      <div id="playhead"></div>
+      <div id="scrubLine" hidden></div>
+      <div id="scrubTip" hidden></div>
+    </div>
+    <div class="controls">
+      <button id="pause" title="Pause or resume (Space)">Pause</button>
+      <div class="speed"><label for="spd">Speed</label><input type="range" id="spd" min="0" max="6" step="1" value="4"><output id="spdOut">4x</output></div>
+      <div id="clock"></div>
+      <button id="toNow" hidden>Back to now</button>
+      <span class="tip">Drag the timeline to rewind</span>
+    </div>
   </footer>
 </div>
 <script type="module" src="{{ url_for('static', filename='ui/main.js') }}"></script>
