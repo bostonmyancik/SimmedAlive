@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "life-sim", "runtimeExecutable": "python3", "runtimeArgs": ["-m", "flask", "--app", "app", "run", "--host", "127.0.0.1", "--port", "5057"], "port": 5057 }
+  ]
+}
