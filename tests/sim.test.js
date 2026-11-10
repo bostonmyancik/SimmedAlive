@@ -967,9 +967,22 @@ test('a base keeps a garrison: a member with nothing to do goes and stands in it
   sim.creatures.push(idle);
   for (let i = 0; i < 80; i++) sim.step(0, 0);
   assert.ok(idle.sheltered);
-  sim.addFood(idle.x + 10, idle.y); // on guard and well fed, it leaves this lying
-  for (let i = 0; i < 10; i++) sim.step(0, 0);
-  assert.equal(sim.food.size, 1);
+});
+
+test('standing guard never stops a creature eating and breeding', () => {
+  // A small species must not be trapped manning its bases while food lies around.
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  base(sim, spot, { plants: RULES.baseStore[0] }); // a full store, so food found is eaten
+  const guard = creature({ x: spot.x, y: spot.y, energy: 60 });
+  sim.creatures.push(guard);
+  sim.step(0, 0);
+  assert.ok(guard.sheltered);
+  for (let i = 0; i < 300; i++) {
+    if (sim.food.size < 3) sim.addFood(spot.x + 8 + (i % 5), spot.y + (i % 7));
+    sim.step(0, 0);
+  }
+  assert.ok(sim.creatures.length > 1);
 });
 
 test('a base whose owners die out passes to a related species nearby, not to strangers', () => {
