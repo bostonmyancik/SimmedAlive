@@ -930,3 +930,63 @@ test('a base in good repair raises newcomers every so often; a badly damaged one
 
   assert.equal(raised(RULES.baseHealth[0] * 0.3).creatures.length, 1);
 });
+
+test('walls hold while anyone shelters inside, and fall once the base is empty', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const home = base(sim, spot, { health: 20 });
+  const defender = creature({ x: spot.x - 20, y: spot.y, energy: 100, speed: 0.01 });
+  const raider = creature({ species: 2, x: spot.x + 3, y: spot.y, strength: 3, preferredTemp: 18, speed: 0.01, energy: 100 });
+  sim.creatures.push(defender, raider);
+  for (let i = 0; i < 40; i++) sim.step(0, 0);
+  assert.equal(home.health, 20);
+  assert.ok(sim.baseInfo(home).underAttack);
+
+  sim.creatures = [raider, creature({ x: (spot.x + 500) % WIDTH, y: spot.y, speed: 0.01 })];
+  for (let i = 0; i < 100 && sim.bases.length; i++) sim.step(0, 0);
+  assert.equal(sim.bases.length, 0);
+});
+
+test('members come from a distance to fight an enemy at their base', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  base(sim, spot);
+  const far = creature({ x: spot.x - 150, y: spot.y, energy: 100, vision: 20 });
+  const stranger = creature({ x: spot.x - 150, y: spot.y + 5, energy: 100, vision: 20, species: 0, preferredTemp: 18 });
+  const raider = creature({ species: 2, x: spot.x + 5, y: spot.y, strength: 4, preferredTemp: 18, speed: 0.01, energy: 100 });
+  sim.creatures.push(far, stranger, raider);
+  for (let i = 0; i < 20; i++) sim.step(0, 0);
+  assert.ok(far.x > spot.x - 130); // well out of sight of the raider, but on its way
+});
+
+test('a base keeps a garrison: a member with nothing to do goes and stands in it', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  base(sim, spot);
+  const idle = creature({ x: spot.x - 120, y: spot.y, energy: 100 });
+  sim.creatures.push(idle);
+  for (let i = 0; i < 80; i++) sim.step(0, 0);
+  assert.ok(idle.sheltered);
+  sim.addFood(idle.x + 10, idle.y); // on guard and well fed, it leaves this lying
+  for (let i = 0; i < 10; i++) sim.step(0, 0);
+  assert.equal(sim.food.size, 1);
+});
+
+test('a base whose owners die out passes to a related species nearby, not to strangers', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const home = base(sim, spot);
+  sim.species.push({ ...sim.species[1], id: sim.species.length, name: 'Heirs', parent: 1, count: 0, established: true });
+  const heirs = sim.species.length - 1;
+  sim.creatures.push(creature({ species: heirs, x: spot.x + 30, y: spot.y, speed: 0.01 }));
+  sim.step(0, 0);
+  assert.equal(sim.bases.length, 1);
+  assert.equal(home.species, heirs);
+  assert.ok(sim.events.some((e) => e.text.includes('took over')));
+
+  const lonely = emptyWorld();
+  base(lonely, spot);
+  lonely.creatures.push(creature({ species: 2, x: spot.x + 100, y: spot.y, preferredTemp: 18, speed: 0.01 }));
+  lonely.step(0, 0);
+  assert.equal(lonely.bases.length, 0);
+});

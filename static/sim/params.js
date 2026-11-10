@@ -124,18 +124,20 @@ export const RULES = {
   baseRadius: 30,              // creatures this close to their own base can shelter in it
   baseShelter: [6, 30],        // creatures a base can shelter
   baseStore: [20, 80],         // meals a base can store
-  baseHealth: [150, 450],      // damage a base can take
+  baseHealth: [300, 900],      // damage a base can take
   baseRepair: 0.05,            // health regained per tick while nobody is attacking
   baseRepairDelay: 200,        // ticks after a hit before repairs start
   baseReachSq: 144,            // an attacker must be this close to the middle to damage a base
   baseDefense: 0.5,            // damage multiplier for a creature sheltering in its base
   baseWarmth: 10,              // degrees of cold a sheltering creature is spared
-  baseGuardRange: 45,          // an enemy this close to a base is charged by its residents
+  baseGuardRange: 45,          // an enemy this close to a base brings every member within haulRange to fight it
+  baseGarrison: 0.5,           // share of its shelter a base keeps manned
+  garrisonAboveEnergy: 35,     // members with at least this much energy take a turn in the garrison
   baseSpawnEvery: 2500,        // ticks between the newcomers a base in good repair raises
   baseSpawnHealth: 0.5,        // share of its full health a base needs to raise them
   baseSpawn: [1, 3],           // newcomers raised each time
   baseAbandonAfter: 3000,      // ticks with nobody sheltering before a base is abandoned
-  haulRange: 220,              // creatures this close to a base treat it as home
+  haulRange: 320,              // creatures this close to a base treat it as home
   carryAboveEnergy: 80,        // a creature this well fed carries food home instead of eating it
   carryEatBelow: 40,           // ...but eats what it is carrying if it gets this hungry
   storeEatBelow: 50,           // a creature this hungry eats from its base's store
