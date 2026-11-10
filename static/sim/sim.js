@@ -1009,8 +1009,6 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // A base keeps a garrison: well-fed members with nothing else to do stay at it.
     const garrisoned = home && c.energy >= RULES.garrisonAboveEnergy
       && home.occupants <= Math.ceil(grown(RULES.baseShelter, home) * RULES.baseGarrison);
-    // Those already inside stand guard: they leave food lying until they are hungry.
-    const onGuard = garrisoned && c.sheltered;
     const headFor = (target) => { c.heading = Math.atan2(target.y - c.y, target.x - c.x); };
     let raid = null;
 
@@ -1031,7 +1029,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       headFor(enemy);
     } else if (c.carrying) {
       headFor(home); // take it to the store
-    } else if (meal && !onGuard) {
+    } else if (meal) {
       headFor(meal);
       if (mealDistSq < Math.max(RULES.minEatRangeSq, c.speed * c.speed)) {
         if (meal === carcass) {

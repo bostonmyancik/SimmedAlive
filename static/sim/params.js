@@ -132,7 +132,7 @@ export const RULES = {
   baseWarmth: 10,              // degrees of cold a sheltering creature is spared
   baseGuardRange: 45,          // an enemy this close to a base brings every member within haulRange to fight it
   baseGarrison: 0.5,           // share of its shelter a base keeps manned
-  garrisonAboveEnergy: 35,     // members with at least this much energy take a turn in the garrison
+  garrisonAboveEnergy: 35,     // members with at least this much energy and nothing else to do man the garrison
   baseSpawnEvery: 2500,        // ticks between the newcomers a base in good repair raises
   baseSpawnHealth: 0.5,        // share of its full health a base needs to raise them
   baseSpawn: [1, 3],           // newcomers raised each time
