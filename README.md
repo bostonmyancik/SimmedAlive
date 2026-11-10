@@ -35,17 +35,19 @@ source .venv/bin/activate && python3 app.py
 - **On the map**: green dots are plants, crosses are carcasses, a blue ring means thirsty, and a bigger body means stronger. Mountains and water block movement.
 - **Sidebar tabs**: Species (every living species), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
 - **Bottom bar**: pause (or Space), speed, the tick, year and season, and a timeline with marks for new species, extinctions, booms, crashes and disasters.
-- **Settings**: food supply, mutation rate, disasters (heat wave, cold snap, drought, plague), the world seed, and Save / Load, which keep one world in this browser. A loaded world carries on exactly where it left off, though the charts restart. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared.
+- **Settings**: food supply, mutation rate, disasters (heat wave, cold snap, drought, plague), the world seed, and saved worlds. The running world is autosaved every five seconds and picked up again when the page loads, so a refresh or restart loses at most a few seconds. You can also save worlds under a name and load or delete them later. A loaded world carries on exactly where it left off, charts included. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared. Opening an address whose seed differs from the autosave starts that world fresh.
 
 ## Where things live
 
-- `app.py`: the Flask server (one route).
+- `app.py`: the Flask server: the page and the saved-worlds API (`/api/saves`).
+- `storage.py`: saved worlds in a SQLite file, `data/lifesim.db` by default. Set the `LIFESIM_DB` environment variable to put it elsewhere. This is the one module to replace if the app ever moves to a hosted database.
 - `templates/index.html`: page layout and styles.
 - `static/ui/`: the page.
   - `main.js`: animation loop, tools, panels and bottom bar. Start reading here.
   - `camera.js`: zoom and pan.
   - `mapview.js`: draws the world and the map layers.
   - `charts.js`: the line chart, the family tree and the timeline strip.
+  - `saves.js`: calls the saved-worlds API.
 - `static/sim/`: the simulation. No page code, so it also runs under Node.
   - `params.js`: every tuning value (species traits, balance settings, fixed rules).
   - `sim.js`: world generation and the per-tick rules. Start reading here.
@@ -55,7 +57,7 @@ source .venv/bin/activate && python3 app.py
   - `grid.js`: fast "nearest thing" lookups.
   - `rng.js`: seeded random numbers.
   - `pack.js`: packs the map grids into text for saved worlds.
-- `tests/`: Node tests for the simulation.
+- `tests/`: Node tests for the simulation, and Python tests for the saved-worlds API.
 
 ## Tests
 
@@ -63,6 +65,12 @@ Needs Node 20 or newer; there is nothing to install.
 
 ```bash
 npm test
+```
+
+The saved-worlds API has Python tests, which use a temporary database:
+
+```bash
+python3 -m unittest discover tests
 ```
 
 ## How the world works
