@@ -82,6 +82,14 @@ class SavesApiTest(unittest.TestCase):
         self.assertEqual(self.client.put("/api/saves", data="nonsense").status_code, 400)
         self.assertEqual(self.client.get("/api/saves").get_json(), [])
 
+    def test_a_save_over_the_size_limit_is_refused_with_a_reason(self):
+        self.client.application.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+        big = {**world(), "data": {"sim": {"padding": "x" * (3 * 1024 * 1024)}}}
+        response = self.client.put("/api/saves", json=big)
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("too large", response.get_json()["error"])
+        self.assertEqual(self.client.get("/api/saves").get_json(), [])
+
     def test_names_are_stored_safely(self):
         name = "Robert'); DROP TABLE saves;--"
         self.client.put("/api/saves", json={**world(), "name": name})

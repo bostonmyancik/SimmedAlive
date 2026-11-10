@@ -111,12 +111,17 @@ export function createMapView(canvas, sim, camera) {
 
   // Colours each area by the species with the most creatures there.
   function paintTerritory() {
-    const n = sim.species.length;
+    // Count only the species alive now, however many there have ever been.
+    const living = sim.species.filter((sp) => sp.count > 0);
+    const slot = new Map(living.map((sp, i) => [sp.id, i]));
+    const n = Math.max(1, living.length);
     const counts = new Uint16Array(TERRITORY_W * TERRITORY_H * n);
     for (const c of sim.creatures) {
+      const s = slot.get(c.species);
+      if (s === undefined) continue; // born since the last head count
       const tx = Math.min(TERRITORY_W - 1, Math.floor(c.x / WIDTH * TERRITORY_W));
       const ty = Math.min(TERRITORY_H - 1, Math.max(0, Math.floor(c.y / HEIGHT * TERRITORY_H)));
-      counts[(ty * TERRITORY_W + tx) * n + c.species]++;
+      counts[(ty * TERRITORY_W + tx) * n + s]++;
     }
     const data = territory.image.data;
     for (let i = 0; i < TERRITORY_W * TERRITORY_H; i++) {
@@ -127,7 +132,7 @@ export function createMapView(canvas, sim, camera) {
           top = s;
         }
       }
-      const [r, g, b] = hexToRgb(sim.species[top].color);
+      const [r, g, b] = hexToRgb(living[top] ? living[top].color : '#000000');
       data[i * 4] = r;
       data[i * 4 + 1] = g;
       data[i * 4 + 2] = b;

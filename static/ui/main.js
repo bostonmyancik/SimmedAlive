@@ -8,7 +8,10 @@ import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, w
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
 import { AUTOSAVE_NAME, listSaves, getSave, getAutosave, putSave, deleteSave } from './saves.js';
-import { METRICS, SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan } from './charts.js';
+import {
+  METRICS, SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan,
+  makeSample, compactHistory, speciesInHistory, familyTreeSpecies,
+} from './charts.js';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 12];
 const REFRESH_EVERY = 6; // frames between panel and layer refreshes
@@ -64,6 +67,8 @@ let eventsShown = -1;      // fingerprint of the event list already rendered
 
 // Species worth showing: founders, and new ones once they have taken hold.
 const shownSpecies = () => sim.species.filter((sp) => sp.established);
+// Species with something to draw: those that appear in the chart history.
+const chartedSpecies = () => speciesInHistory(history, shownSpecies());
 const livingSpecies = () => shownSpecies().filter((sp) => sp.count > 0).sort((a, b) => b.count - a.count);
 
 function dietWords(diet) {
@@ -157,8 +162,11 @@ function refreshSpecies() {
     // Keep the cards sorted by population, moving one only when its place changed.
     if (container.children[position] !== card.root) container.insertBefore(card.root, container.children[position] || null);
   });
-  const extinct = shownSpecies().filter((sp) => sp.count === 0);
-  $('extinctList').textContent = extinct.length ? 'Extinct: ' + extinct.map((sp) => sp.name).join(', ') : '';
+  // Name the most recent losses; a long run has far too many to list them all.
+  const extinct = shownSpecies().filter((sp) => sp.count === 0).sort((a, b) => b.extinctTick - a.extinctTick);
+  $('extinctList').textContent = extinct.length
+    ? 'Extinct: ' + extinct.slice(0, 8).map((sp) => sp.name).join(', ') + (extinct.length > 8 ? ', and ' + fmt(extinct.length - 8) + ' earlier' : '')
+    : '';
 }
 
 function setMeter(id, text, fraction) {
@@ -248,12 +256,12 @@ function showTab(name) {
 // ---------- Charts and bottom bar ----------
 
 function drawCharts() {
-  const shown = shownSpecies();
+  const shown = chartedSpecies();
   drawTimeline($('timeline'), history, shown, latestTick);
   if ($('tab-charts').hidden) return;
   drawLineChart($('hist'), history, shown, latestTick, METRICS[$('metric').value]);
   $('chartKey').innerHTML = livingSpecies().map((sp) => '<span>' + dot(sp.color) + sp.name + '</span>').join('');
-  drawFamilyTree($('tree'), shown, sim.species, sim.tick);
+  drawFamilyTree($('tree'), familyTreeSpecies(shownSpecies(), sim.tick), sim.species, sim.tick);
 }
 
 function refreshClock() {
@@ -395,7 +403,7 @@ function showWorld(savedHistory = []) {
 }
 
 function sample() {
-  history.push({ tick: sim.tick, counts: sim.species.map((sp) => sp.count), traits: sim.stats() });
+  history.push(makeSample(sim.tick, sim.species, sim.stats()));
   const start = windowStart(sim.tick);
   while (history.length > 1 && history[1].tick <= start) history.shift();
 }
@@ -746,7 +754,7 @@ async function saveWorld() {
 // Replaces the running world with a stored one.
 function restore(data) {
   sim.load(data.sim);
-  showWorld(Array.isArray(data.history) ? data.history : []);
+  showWorld(Array.isArray(data.history) ? compactHistory(data.history) : []);
   autosavedTick = -1;
 }
 
@@ -873,7 +881,8 @@ $('metric').onchange = drawCharts;
 window.lifesimCharts = {
   read: () => ({
     history,
-    shown: shownSpecies(),
+    shown: chartedSpecies(),
+    tree: familyTreeSpecies(shownSpecies(), sim.tick),
     living: livingSpecies(),
     species: sim.species,
     latestTick,
