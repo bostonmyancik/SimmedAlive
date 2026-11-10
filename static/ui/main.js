@@ -7,6 +7,7 @@ import { RULES } from '../sim/params.js';
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
+import { AUTOSAVE_NAME, listSaves, getSave, getAutosave, putSave, deleteSave } from './saves.js';
 import { SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan } from './charts.js';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 12];
@@ -17,13 +18,14 @@ const dot = (color) => '<span class="dot" style="background:' + color + '"></spa
 
 // Open the page with ?seed=123 to replay a particular world.
 const urlSeed = Number(new URLSearchParams(location.search).get('seed'));
-const sim = createSim({ seed: Number.isInteger(urlSeed) && urlSeed > 0 ? urlSeed : randomSeed() });
+const hasUrlSeed = Number.isInteger(urlSeed) && urlSeed > 0;
+const sim = createSim({ seed: hasUrlSeed ? urlSeed : randomSeed() });
 
 const canvas = $('world');
 const camera = createCamera(WIDTH, HEIGHT);
 const map = createMapView(canvas, sim, camera);
 
-const SAVE_KEY = 'lifesim.save.v1';
+const AUTOSAVE_EVERY_MS = 5000;
 const BRUSH_TOOLS = ['food', 'terrain', 'warm', 'cool']; // drag to paint with these
 const TOOL_TIPS = {
   food: 'Drag to scatter plants.',
@@ -37,6 +39,9 @@ let paused = false;
 let tool = 'select';       // 'select' | 'food' | 'terrain' | 'warm' | 'cool' | 'meteor'
 let brushKind = 'water';   // what the terrain brush paints
 let hover = null;          // pointer position over the map, in view pixels
+let autosavedTick = -1;    // tick of the last successful autosave
+let worldEdited = false;   // the world changed without the tick advancing (brush, disaster, new world)
+let savingNow = false;     // an autosave request is in flight
 let selected = null;       // the creature shown in the Inspector
 let selectedDiedAt = null; // tick at which it died, if it has
 let following = false;     // keep the camera on the selected creature
@@ -276,8 +281,10 @@ function newWorld(seed) {
 }
 
 // Points the page at whatever world the sim now holds (new or loaded).
-function showWorld() {
-  history = [];
+// `savedHistory` is the chart history that came with a loaded world.
+function showWorld(savedHistory = []) {
+  history = savedHistory;
+  worldEdited = true;
   debt = 0;
   eventsShown = -1;
   select(null);
@@ -286,7 +293,7 @@ function showWorld() {
   window.history.replaceState(null, '', '?seed=' + sim.seed);
   map.paintWorld();
   map.paintLayer();
-  sample();
+  if (!history.length) sample();
   refreshAll();
 }
 
@@ -339,6 +346,7 @@ function frame() {
 function paint(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
+  worldEdited = true;
   const radius = brushRadius();
   if (tool === 'food') {
     for (let i = 0; i < 4; i++) {
@@ -374,6 +382,7 @@ function clickMap(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
   if (tool === 'meteor') {
+    worldEdited = true;
     sim.meteor(at.x, at.y);
     map.paintWorld();
     map.paintLayer();
@@ -472,42 +481,130 @@ function togglePause() {
 }
 
 // ---------- Saving ----------
+// Worlds are stored by the server in a SQLite file. The current run is
+// autosaved every few seconds and restored when the page loads.
 
-function refreshSaveStatus(message) {
-  let status = message;
-  if (!status) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
-      status = saved
-        ? 'Saved at tick ' + fmt(saved.sim.tick) + ' on ' + new Date(saved.savedAt).toLocaleString() + '.'
-        : 'Nothing saved yet. Saving keeps the world in this browser.';
-    } catch {
-      status = 'Saving is not available in this browser.';
-    }
-  }
-  $('saveStatus').textContent = status;
+function setSaveStatus(text) {
+  $('saveStatus').textContent = text;
 }
 
-function saveWorld() {
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ savedAt: Date.now(), sim: sim.save() }));
-    refreshSaveStatus();
-  } catch {
-    refreshSaveStatus('Could not save: the browser refused to store the world.');
-  }
-}
+// The world plus the chart history, ready to store.
+const snapshot = () => ({ sim: sim.save(), history });
 
-function loadWorld() {
-  let saved;
+async function autosave() {
+  if (savingNow || (sim.tick === autosavedTick && !worldEdited)) return;
+  savingNow = true;
+  const tick = sim.tick;
   try {
-    saved = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (!saved) return refreshSaveStatus('There is no saved world to load.');
-    sim.load(saved.sim);
+    await putSave(AUTOSAVE_NAME, snapshot());
+    autosavedTick = tick;
+    worldEdited = false;
+    setSaveStatus('Autosaved at tick ' + fmt(tick) + '. A refresh picks up from there.');
+    // Keep the list's autosave row current, unless a Delete button is waiting to be confirmed.
+    if (!$('tab-settings').hidden && !$('saves').querySelector('.sure')) refreshSaves();
   } catch (error) {
-    return refreshSaveStatus('Could not load the saved world: ' + error.message);
+    setSaveStatus('Autosave failed: ' + error.message);
   }
-  showWorld();
-  refreshSaveStatus('Loaded the world saved at tick ' + fmt(sim.tick) + '. Charts restart from here.');
+  savingNow = false;
+}
+
+async function saveWorld() {
+  const name = $('saveName').value.trim();
+  if (!name) return setSaveStatus('Type a name for this world first.');
+  try {
+    await putSave(name, snapshot());
+    $('saveName').value = '';
+    setSaveStatus('Saved "' + name + '" at tick ' + fmt(sim.tick) + '.');
+    await refreshSaves();
+  } catch (error) {
+    setSaveStatus('Could not save: ' + error.message);
+  }
+}
+
+// Replaces the running world with a stored one.
+function restore(data) {
+  sim.load(data.sim);
+  showWorld(Array.isArray(data.history) ? data.history : []);
+  autosavedTick = -1;
+}
+
+async function loadSave(id) {
+  try {
+    const saved = await getSave(id);
+    restore(saved.data);
+    setSaveStatus('Loaded "' + saved.name + '" from tick ' + fmt(saved.tick) + '.');
+  } catch (error) {
+    setSaveStatus('Could not load that world: ' + error.message);
+  }
+}
+
+async function refreshSaves() {
+  let saves;
+  try {
+    saves = await listSaves();
+  } catch (error) {
+    return setSaveStatus('Could not reach the saved worlds: ' + error.message);
+  }
+  const list = $('saves');
+  list.textContent = '';
+  for (const save of saves) {
+    const item = document.createElement('li');
+    const info = document.createElement('div');
+    info.className = 'info';
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = save.name; // names are typed by the user, so never set as HTML
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = 'Tick ' + fmt(save.tick) + ' · ' + new Date(save.updated_at).toLocaleString();
+    info.append(title, meta);
+
+    const load = document.createElement('button');
+    load.textContent = 'Load';
+    load.onclick = () => loadSave(save.id);
+    const remove = document.createElement('button');
+    remove.textContent = 'Delete';
+    remove.onclick = async () => {
+      // Ask once more before deleting: the first click only arms the button.
+      if (!remove.classList.contains('sure')) {
+        remove.classList.add('sure');
+        remove.textContent = 'Really delete?';
+        return;
+      }
+      try {
+        await deleteSave(save.id);
+        if (save.autosave) worldEdited = true; // so the running world is autosaved again
+      } catch (error) {
+        setSaveStatus('Could not delete: ' + error.message);
+      }
+      refreshSaves();
+    };
+    item.append(info, load, remove);
+    list.append(item);
+  }
+}
+
+// On page load: carry on from the autosave unless the address asks for a
+// different world; otherwise start the world the address (or chance) picked.
+async function start() {
+  let restored = false;
+  try {
+    const saved = await getAutosave();
+    if (saved && (!hasUrlSeed || saved.seed === sim.seed)) {
+      restore(saved.data);
+      autosavedTick = sim.tick;
+      setSaveStatus('Picked up the autosave from tick ' + fmt(sim.tick) + '.');
+      restored = true;
+    }
+  } catch (error) {
+    setSaveStatus('Could not restore the autosave: ' + error.message);
+  }
+  if (!restored) newWorld(sim.seed);
+  refreshSaves();
+  setInterval(autosave, AUTOSAVE_EVERY_MS);
+  // One last save when the tab is hidden or closed, while the page can still send it.
+  document.addEventListener('visibilitychange', () => { if (document.hidden) autosave(); });
+  frame();
 }
 
 function loadSeed() {
@@ -519,12 +616,13 @@ function loadSeed() {
 $('fRate').oninput = (e) => ($('fOut').textContent = (+e.target.value).toFixed(1));
 $('mut').oninput = (e) => ($('mutOut').textContent = (+e.target.value).toFixed(1));
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
-$('heat').onclick = () => { sim.heatWave(); refreshAll(); };
-$('cold').onclick = () => { sim.coldSnap(); refreshAll(); };
-$('drought').onclick = () => { sim.drought(); refreshAll(); };
-$('plague').onclick = () => { sim.plague(); refreshAll(); };
+const disaster = (strike) => () => { strike(); worldEdited = true; refreshAll(); };
+$('heat').onclick = disaster(sim.heatWave);
+$('cold').onclick = disaster(sim.coldSnap);
+$('drought').onclick = disaster(sim.drought);
+$('plague').onclick = disaster(sim.plague);
 $('saveWorld').onclick = saveWorld;
-$('loadWorld').onclick = loadWorld;
+$('saveName').onkeydown = (e) => { if (e.key === 'Enter') saveWorld(); };
 for (const b of $('kinds').children) {
   b.onclick = () => {
     brushKind = b.dataset.kind;
@@ -574,6 +672,4 @@ new ResizeObserver(() => map.resize()).observe($('map'));
 map.resize();
 camera.fill();
 setLayer('none');
-newWorld(sim.seed);
-refreshSaveStatus();
-frame();
+start();
