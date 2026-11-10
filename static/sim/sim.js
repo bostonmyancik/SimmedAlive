@@ -587,6 +587,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
   // ---------- Bases ----------
 
   let basesOf = new Map(); // species id -> its standing bases; rebuilt every tick
+  let threatAt = new Map(); // base -> the enemy creature nearest its middle, if one is close; rebuilt every tick
 
   // How grown a base is: 0 when new, 1 once it has stood for a year.
   const baseGrowth = (base) => Math.min(1, (sim.tick - base.builtTick) / YEAR_TICKS);
@@ -621,9 +622,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
   // Decides who is sheltering this tick: members standing at their own base,
   // up to as many as it holds. Needs the creature grid to be current.
+  // It also notes the enemy closest to each base, for its members to go after.
   function shelterCreatures() {
     indexBases();
+    threatAt = new Map();
+    const guardSq = RULES.baseGuardRange * RULES.baseGuardRange;
     for (const base of sim.bases) {
+      const threat = creatureGrid.nearest(base.x, base.y, guardSq, (o) => o.energy > 0 && isHostile(base.species, o.species));
+      if (threat) threatAt.set(base, threat);
       const room = grown(RULES.baseShelter, base);
       base.occupants = 0;
       creatureGrid.forEachNear(base.x, base.y, RULES.baseRadius, (c) => {
@@ -744,6 +750,30 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (random() < chance) addFood(x, y);
   }
 
+  // A base its owners can no longer hold passes to their nearest kin: a
+  // species that split from them, or the one they split from, that has members
+  // close by and room for another base. Returns whether anyone took it.
+  function handDown(base) {
+    const owner = sim.species[base.species];
+    const held = new Map();
+    for (const other of sim.bases) if (other.health > 0) held.set(other.species, (held.get(other.species) || 0) + 1);
+    const nearby = new Map();
+    for (const c of sim.creatures) {
+      if (within(c, base.x, base.y, RULES.haulRange)) nearby.set(c.species, (nearby.get(c.species) || 0) + 1);
+    }
+    let heir = null;
+    for (const sp of sim.species) {
+      if (!sp.count || !nearby.get(sp.id) || (held.get(sp.id) || 0) >= P.maxBases) continue;
+      if (sp.parent !== owner.id && owner.parent !== sp.id) continue;
+      if (!heir || nearby.get(sp.id) > nearby.get(heir.id)) heir = sp;
+    }
+    if (!heir) return false;
+    logEvent('base', heir.name + ' took over a ' + baseLabel(base), heir.id);
+    base.species = heir.id;
+    base.usedTick = sim.tick;
+    return true;
+  }
+
   // A base in good repair raises newcomers: young of its species, each taking
   // after a living member picked at random, who start out at the base.
   function raiseNewcomers(base, mutationRate) {
@@ -770,11 +800,11 @@ export function createSim({ seed = 1, params = {} } = {}) {
       if (base.health <= 0) continue;
       const sp = sim.species[base.species];
       if (sp.count === 0) {
-        destroyBase(base, 'A ' + baseLabel(base) + ' fell into ruin');
+        if (!handDown(base)) destroyBase(base, 'A ' + baseLabel(base) + ' fell into ruin');
         continue;
       }
       if (sim.tick - base.usedTick > RULES.baseAbandonAfter) {
-        destroyBase(base, sp.name + ' abandoned a ' + baseStage(base));
+        if (!handDown(base)) destroyBase(base, sp.name + ' abandoned a ' + baseStage(base));
         continue;
       }
       if (base.hitTick === null || sim.tick - base.hitTick > RULES.baseRepairDelay) {
@@ -916,10 +946,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
       enemy.energy -= damage * (enemy.sheltered ? RULES.baseDefense : 1);
       if (enemy.energy <= 0) sim.species[c.species].kills++;
     } else if (sim.bases.length) {
+      // Walls come down only once nobody is left inside to hold them, and a
+      // meat-eater's bite is no better against them than anyone else's blows.
       const target = enemyBase(c, RULES.baseReachSq, false);
-      if (target) {
-        target.health -= damage;
-        target.hitTick = sim.tick;
+      if (target) target.hitTick = sim.tick;
+      if (target && !target.occupants) {
+        target.health -= damage / (1 + P.dietDamageBonus * c.diet);
         if (target.health <= 0) destroyBase(target, sim.species[c.species].name + ' destroyed a ' + baseLabel(target));
       }
     }
@@ -970,17 +1002,22 @@ export function createSim({ seed = 1, params = {} } = {}) {
       && enemy.strength < c.strength * RULES.huntStrengthRatio
       && c.energy < P.huntEnergy * 2 * c.diet
       && (!meal || enemyDistSq < mealDistSq);
-    // Residents charge any enemy that comes up to their base, however strong.
-    const guardSq = RULES.baseGuardRange * RULES.baseGuardRange;
-    const defending = home && enemy && !c.thirsty && homeDistSq < 4 * guardSq
-      && (enemy.x - home.x) * (enemy.x - home.x) + (enemy.y - home.y) * (enemy.y - home.y) < guardSq;
+    // When an enemy comes up to a base, every member that calls it home drops
+    // what it is doing and goes for that enemy, however strong it is.
+    const threat = home ? threatAt.get(home) : undefined;
+    const defending = threat && threat.energy > 0 && !c.thirsty;
+    // A base keeps a garrison: well-fed members with nothing else to do stay at it.
+    const garrisoned = home && c.energy >= RULES.garrisonAboveEnergy
+      && home.occupants <= Math.ceil(grown(RULES.baseShelter, home) * RULES.baseGarrison);
+    // Those already inside stand guard: they leave food lying until they are hungry.
+    const onGuard = garrisoned && c.sheltered;
     const headFor = (target) => { c.heading = Math.atan2(target.y - c.y, target.x - c.x); };
     let raid = null;
 
     if (swimming && !c.swimmer && headTowardLand(c, cell)) {
       // Out of its depth: make for the shore before anything else.
     } else if (defending) {
-      headFor(enemy);
+      headFor(threat);
     } else if (mustFlee) {
       c.heading = Math.atan2(c.y - enemy.y, c.x - enemy.x);
     } else if (c.thirsty) {
@@ -994,7 +1031,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       headFor(enemy);
     } else if (c.carrying) {
       headFor(home); // take it to the store
-    } else if (meal) {
+    } else if (meal && !onGuard) {
       headFor(meal);
       if (mealDistSq < Math.max(RULES.minEatRangeSq, c.speed * c.speed)) {
         if (meal === carcass) {
@@ -1026,6 +1063,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       }
     } else if (c.sheltered && outdoorStress > 0 && c.energy >= RULES.storeEatBelow) {
       move = 0; // comfortable indoors, cold outside: stay put
+    } else if (garrisoned && homeDistSq > RULES.baseRadius * RULES.baseRadius * 0.36) {
+      headFor(home); // nothing to do: man the base
     } else {
       c.heading += (random() - 0.5) * 0.5; // wander
     }
