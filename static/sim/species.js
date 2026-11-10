@@ -21,6 +21,26 @@ export function traitsOf(source) {
   return traits;
 }
 
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// Tidies a list of founding species typed in by hand: names are stripped to
+// letters, digits, spaces and hyphens (they are shown on the page), colours
+// must be #rrggbb, and every number is brought within its allowed range.
+// Anything missing or unusable is taken from `fallback`, one entry of the same shape.
+export function normalizeFounders(list, fallback) {
+  const number = (value, [lo, hi], otherwise) => (Number.isFinite(+value) && value !== '' && value !== null ? clamp(+value, lo, hi) : otherwise);
+  return list.slice(0, RULES.maxFounders).map((founder) => {
+    const name = String(founder.name ?? '').replace(/[^\p{L}\p{N} -]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 24);
+    const tidy = {
+      name: name || fallback.name,
+      color: /^#[0-9a-f]{6}$/i.test(founder.color) ? founder.color.toLowerCase() : fallback.color,
+      startCount: Math.round(number(founder.startCount, [1, RULES.maxStartCount], fallback.startCount ?? RULES.startPerSpecies)),
+    };
+    for (const trait of TRAITS) tidy[trait] = number(founder[trait], RULES.traitLimits[trait], fallback[trait]);
+    return tidy;
+  });
+}
+
 const CLIMATE_WORDS = [
   [4, ['Frost', 'Snow', 'Ice', 'Rime']],
   [12, ['Mist', 'Pine', 'Stone', 'Grey']],
