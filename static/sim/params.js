@@ -63,6 +63,8 @@ export const RULES = {
   maxFoodNearby: 10,           // plants stop sprouting where this many already crowd one patch of ground
   maxFood: 1800,               // natural growth stops here (dropped food can exceed it)
   maxCreatures: 1800,
+  maxFounders: 8,              // most founding species a world can start with
+  maxStartCount: 200,          // most members a founding species can start with
   maxAge: 3000,
 
   startEnergy: 60,

@@ -5,7 +5,7 @@ import { SPECIES, DEFAULT_PARAMS, RULES } from './params.js';
 import { mulberry32 } from './rng.js';
 import { SpatialGrid } from './grid.js';
 import { spawnCreature, makeOffspring } from './creatures.js';
-import { TRAITS, traitDistance, traitsOf, nameSpecies, colorForSpecies } from './species.js';
+import { TRAITS, traitDistance, traitsOf, nameSpecies, colorForSpecies, normalizeFounders } from './species.js';
 import { pack, unpack } from './pack.js';
 import {
   GRID_W, GRID_H, CELL, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN,
@@ -56,6 +56,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // Every species that has ever existed; a creature's `species` indexes this.
     // { id, name, color, parent, bornTick, extinctTick, established, count, kills, origin }
     species: [],
+    // The species a new world starts with. Change them with setFounders().
+    founders: normalizeFounders(SPECIES, SPECIES[0]),
     water: new Uint8Array(GRID_W * GRID_H),           // 1 = water
     terrain: new Uint8Array(GRID_W * GRID_H),         // PLAIN, FERTILE, DESERT or MOUNTAIN
     blocked: new Uint8Array(GRID_W * GRID_H),         // 1 = water or mountain
@@ -75,6 +77,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     temperatureBoost: 0, // degrees added everywhere; fades over time
     droughtUntil: 0,     // a drought is on while tick < droughtUntil
     generate,
+    populate,
+    setFounders,
     step,
     stats,
     addFood,
@@ -114,8 +118,21 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
   // ---------- World generation ----------
 
+  // Sets the species that new worlds start with: a list of
+  // { name, color, startCount, speed, vision, strength, preferredTemp, diet }.
+  // Values out of range are brought into it. An empty list restores the originals.
+  function setFounders(list) {
+    const tidy = normalizeFounders(Array.isArray(list) ? list : [], SPECIES[1]);
+    sim.founders = tidy.length ? tidy : normalizeFounders(SPECIES, SPECIES[0]);
+  }
+
   // Builds a fresh world. Pass a new seed, or omit it to rebuild the same one.
-  function generate(newSeed = sim.seed) {
+  //   map:      'random' builds lakes, mountains and land from the seed;
+  //             'blank' is open plain with no water, ready to be painted;
+  //             'keep' leaves the terrain as it is.
+  //   populate: false leaves the world empty until populate() is called, so
+  //             the map can be painted first.
+  function generate(newSeed = sim.seed, { map = 'random', populate: populateNow = true } = {}) {
     sim.seed = newSeed;
     random = mulberry32(newSeed);
     nextCreatureId = 1;
@@ -131,10 +148,16 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.droughtUntil = 0;
     sim.tempOffset.fill(0);
 
-    generateLakes(sim.water, random);
-    generateMountains(sim.terrain, sim.water, random);
-    computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
-    classifyLand(sim.terrain, sim.water, sim.waterDistance, random);
+    if (map === 'blank') {
+      sim.water.fill(0);
+      sim.terrain.fill(PLAIN);
+      computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
+    } else if (map !== 'keep') {
+      generateLakes(sim.water, random);
+      generateMountains(sim.terrain, sim.water, random);
+      computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
+      classifyLand(sim.terrain, sim.water, sim.waterDistance, random);
+    }
     rebuildBlocked();
 
     // Warm and cold fronts, each drifting in its own direction.
@@ -147,7 +170,20 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }));
     refreshTemperature();
 
-    sim.species = SPECIES.map((founder, id) => ({
+    sim.species = [];
+    if (populateNow) populate();
+  }
+
+  // Puts the founding species and the first plants into a world that has none
+  // yet. Returns false, changing nothing, if there is no land with a way to
+  // water for them to live on, or if the world is already populated.
+  function populate() {
+    if (sim.species.length) return false;
+    const livable = [];
+    for (let cell = 0; cell < sim.blocked.length; cell++) if (habitable(cell)) livable.push(cell);
+    if (!livable.length) return false;
+
+    sim.species = sim.founders.map((founder, id) => ({
       id,
       name: founder.name,
       color: founder.color,
@@ -158,18 +194,24 @@ export function createSim({ seed = 1, params = {} } = {}) {
       count: 0,
       kills: 0,
       origin: traitsOf(founder),
-      lastTrendCount: founder.startCount ?? RULES.startPerSpecies,
+      lastTrendCount: founder.startCount,
     }));
 
     // Each founding species starts in the latitude band that suits its climate.
-    SPECIES.forEach((founder, id) => {
+    // If that band has nowhere to live (on a hand-made map, say), anywhere livable will do.
+    sim.founders.forEach((founder, id) => {
       const latitude = clamp(((founder.preferredTemp - RULES.baseTemp) / P.tempGradient + 1) / 2, 0.16, 0.84);
-      for (let i = 0; i < (founder.startCount ?? RULES.startPerSpecies); i++) {
+      for (let i = 0; i < founder.startCount; i++) {
         let x, y, tries = 0;
         do {
           x = random() * WIDTH;
           y = clamp((latitude + (random() - 0.5) * 0.26) * HEIGHT, 0, HEIGHT - 1);
         } while (!habitable(cellIndex(x, y)) && tries++ < 50);
+        if (!habitable(cellIndex(x, y))) {
+          const cell = livable[Math.floor(random() * livable.length)];
+          x = (cell % GRID_W + random()) * CELL;
+          y = (Math.floor(cell / GRID_W) + random()) * CELL;
+        }
         sim.creatures.push(spawnCreature(nextCreatureId++, id, founder, x, y, P.swimmerShare, random));
       }
     });
@@ -179,6 +221,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       const x = random() * WIDTH, y = random() * HEIGHT;
       addFood(x, y);
     }
+    return true;
   }
 
   function rebuildBlocked() {
@@ -317,8 +360,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
   // A disease sweeps through the most numerous species. Returns how many died.
   function plague() {
-    const target = sim.species.reduce((a, b) => (b.count > a.count ? b : a));
-    if (!target.count) return 0;
+    const target = sim.species.reduce((a, b) => (!a || b.count > a.count ? b : a), null);
+    if (!target || !target.count) return 0;
     let died = 0;
     for (const c of sim.creatures) {
       if (c.species === target.id && c.energy > 0 && random() < RULES.plagueDeathRate) {

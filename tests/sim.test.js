@@ -853,3 +853,58 @@ test('a save from before bases existed still loads', () => {
   assert.ok(restored.creatures.every((c) => c.carrying === 0 && c.sheltered === false));
   restored.step(1, 0.4);
 });
+
+// ---------- Your own species and maps ----------
+
+test('a world can start with species you describe, tidied into the allowed ranges', () => {
+  const sim = createSim({ seed: 9 });
+  sim.setFounders([
+    { name: 'Glow<b>worms</b>', color: '#12ab9c', startCount: 40, speed: 2, vision: 50, strength: 1, preferredTemp: 20, diet: 0.5 },
+    { name: '', color: 'red', startCount: 9999, speed: 99, vision: 'x', strength: -3, preferredTemp: 10, diet: 2 },
+  ]);
+  sim.generate();
+  assert.deepEqual(sim.species.map((sp) => sp.name), ['Glowbwormsb', 'Meadowfolk']); // markup stripped; blank name replaced
+  assert.deepEqual(sim.species.map((sp) => sp.count), [40, RULES.maxStartCount]);
+  assert.equal(sim.species[0].color, '#12ab9c');
+  const second = sim.founders[1];
+  assert.equal(second.speed, RULES.traitLimits.speed[1]);
+  assert.equal(second.strength, RULES.traitLimits.strength[0]);
+  assert.equal(second.diet, 1);
+  assert.equal(second.vision, SPECIES[1].vision); // unusable, so the fallback's
+  assert.ok(sim.creatures.filter((c) => c.species === 0).every((c) => c.vision === 50 && c.diet === 0.5));
+  for (let i = 0; i < 200; i++) sim.step(1, 0.4);
+
+  sim.setFounders([]);
+  assert.deepEqual(sim.founders.map((f) => f.name), SPECIES.map((f) => f.name));
+});
+
+test('a blank map waits to be painted, and is populated only once it has water', () => {
+  const sim = createSim({ seed: 3 });
+  sim.generate(3, { map: 'blank', populate: false });
+  assert.ok(sim.water.every((w) => w === 0) && sim.terrain.every((t) => t === 0));
+  assert.equal(sim.creatures.length + sim.food.size + sim.species.length, 0);
+  assert.equal(sim.plague(), 0);
+  assert.equal(sim.populate(), false); // nowhere to drink
+  assert.equal(sim.creatures.length, 0);
+
+  sim.paintTerrain(700, 340, 40, 'water');
+  sim.paintTerrain(400, 340, 60, 'fertile');
+  assert.equal(sim.populate(), true);
+  assert.equal(sim.species.length, SPECIES.length);
+  assert.equal(sim.creatures.length, sim.founders.reduce((sum, f) => sum + f.startCount, 0));
+  assert.ok(sim.creatures.every((c) => !sim.blocked[cellIndex(c.x, c.y)]));
+  assert.equal(sim.populate(), false); // already populated
+  for (let i = 0; i < 300; i++) sim.step(1, 0.4);
+  assert.ok(sim.creatures.length > 0);
+});
+
+test('an existing map can be kept and repopulated', () => {
+  const sim = run(4, 100);
+  const terrain = Array.from(sim.terrain), water = Array.from(sim.water);
+  sim.generate(4, { map: 'keep', populate: false });
+  assert.deepEqual(Array.from(sim.terrain), terrain);
+  assert.deepEqual(Array.from(sim.water), water);
+  assert.equal(sim.tick, 0);
+  assert.equal(sim.creatures.length, 0);
+  assert.equal(sim.populate(), true);
+});

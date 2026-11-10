@@ -3,7 +3,8 @@
 
 import { createSim } from '../sim/sim.js';
 import { randomSeed } from '../sim/rng.js';
-import { RULES } from '../sim/params.js';
+import { RULES, SPECIES } from '../sim/params.js';
+import { normalizeFounders, colorForSpecies } from '../sim/species.js';
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
@@ -344,7 +345,10 @@ function refreshAll() {
   refreshMarkers();
   refreshLegend();
   drawCharts();
-  $('banner').hidden = sim.creatures.length > 0;
+  // A world with no species yet is a map still being built.
+  const building = sim.species.length === 0;
+  $('banner').hidden = building || sim.creatures.length > 0;
+  $('buildBar').hidden = !building;
 }
 
 // ---------- Map overlays ----------
@@ -436,6 +440,111 @@ function showWorld(savedHistory = []) {
   map.paintLayer();
   if (!history.length) sample();
   refreshAll();
+}
+
+// ---------- Your own species and map ----------
+
+const BUILD_TIP = 'Paint your map with the Terrain tool.';
+// [key, label, lowest, highest, step]. Diet is typed as a percentage.
+const FOUNDER_FIELDS = [
+  ['startCount', 'Starting number', 1, RULES.maxStartCount, 1],
+  ['speed', 'Speed', ...RULES.traitLimits.speed, 0.1],
+  ['strength', 'Strength', ...RULES.traitLimits.strength, 0.1],
+  ['vision', 'Vision', ...RULES.traitLimits.vision, 1],
+  ['preferredTemp', 'Prefers (°C)', ...RULES.traitLimits.preferredTemp, 1],
+  ['diet', 'Meat in diet (%)', 0, 100, 5],
+];
+const originalFounders = () => normalizeFounders(SPECIES, SPECIES[0]);
+// What a species becomes when a field is left blank or unusable.
+const FOUNDER_DEFAULTS = { ...SPECIES[1], name: 'Newcomers' };
+
+// The founding species for new worlds, remembered between visits.
+let founders = originalFounders();
+try {
+  const stored = JSON.parse(readPreference('lifesim.founders'));
+  if (Array.isArray(stored) && stored.length) founders = normalizeFounders(stored, FOUNDER_DEFAULTS);
+} catch { /* nothing usable stored */ }
+sim.setFounders(founders);
+
+function foundersChanged() {
+  sim.setFounders(founders);
+  try { localStorage.setItem('lifesim.founders', JSON.stringify(founders)); } catch { /* not remembered */ }
+}
+
+function renderFounders() {
+  const list = $('founders');
+  list.textContent = '';
+  founders.forEach((founder, index) => {
+    const card = document.createElement('div');
+    card.className = 'founder';
+    // Takes what was typed, tidies it, and shows the tidied value back.
+    const bind = (input, key, read = (v) => v, show = (v) => v) => {
+      input.value = show(founder[key]);
+      input.onchange = () => {
+        founder[key] = read(input.value);
+        founders[index] = normalizeFounders([founder], FOUNDER_DEFAULTS)[0];
+        founder = founders[index];
+        input.value = show(founder[key]);
+        foundersChanged();
+      };
+    };
+    const top = document.createElement('div');
+    top.className = 'top';
+    const color = Object.assign(document.createElement('input'), { type: 'color', title: 'Colour' });
+    color.setAttribute('aria-label', 'Colour');
+    bind(color, 'color');
+    const name = Object.assign(document.createElement('input'), { type: 'text', maxLength: 24 });
+    name.setAttribute('aria-label', 'Species name');
+    bind(name, 'name');
+    const remove = Object.assign(document.createElement('button'), { textContent: 'Remove', disabled: founders.length === 1 });
+    remove.onclick = () => {
+      founders.splice(index, 1);
+      foundersChanged();
+      renderFounders();
+    };
+    top.append(color, name, remove);
+
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    for (const [key, label, min, max, step] of FOUNDER_FIELDS) {
+      const field = document.createElement('label');
+      const input = Object.assign(document.createElement('input'), { type: 'number', min, max, step });
+      if (key === 'diet') bind(input, key, (v) => (v === '' ? '' : v / 100), (v) => Math.round(v * 100));
+      else bind(input, key, (v) => v, (v) => +(+v).toFixed(2));
+      field.append(label, input);
+      grid.append(field);
+    }
+    card.append(top, grid);
+    list.append(card);
+  });
+  $('addFounder').disabled = founders.length >= RULES.maxFounders;
+}
+
+function addFounder() {
+  if (founders.length >= RULES.maxFounders) return;
+  const taken = new Set(founders.map((f) => f.name));
+  let name = FOUNDER_DEFAULTS.name;
+  for (let n = 2; taken.has(name); n++) name = FOUNDER_DEFAULTS.name + ' ' + n;
+  founders.push({ ...normalizeFounders([FOUNDER_DEFAULTS], FOUNDER_DEFAULTS)[0], name, color: colorForSpecies(founders.length, founders.map((f) => f.color)) });
+  foundersChanged();
+  renderFounders();
+}
+
+// Starts an empty world to paint: open land ('blank') or the present map ('keep').
+function buildMap(kind) {
+  sim.generate(kind === 'blank' ? randomSeed() : sim.seed, { map: kind, populate: false });
+  $('buildText').textContent = BUILD_TIP;
+  showWorld();
+  setTool('terrain');
+}
+
+function releaseSpecies() {
+  if (!sim.populate()) {
+    $('buildText').textContent = 'Creatures need water to drink. Paint some water with land beside it first.';
+    return;
+  }
+  showWorld();
+  setTool('select');
 }
 
 function sample() {
@@ -915,6 +1024,17 @@ $('bannerNew').onclick = () => newWorld(randomSeed());
 $('seedLoad').onclick = loadSeed;
 $('seedInput').onkeydown = (e) => { if (e.key === 'Enter') loadSeed(); };
 $('metric').onchange = drawCharts;
+$('addFounder').onclick = addFounder;
+$('resetFounders').onclick = () => {
+  founders = originalFounders();
+  foundersChanged();
+  renderFounders();
+};
+$('blankMap').onclick = () => buildMap('blank');
+$('editMap').onclick = () => buildMap('keep');
+$('release').onclick = releaseSpecies;
+$('buildText').textContent = BUILD_TIP;
+renderFounders();
 
 // The pop-out charts window (templates/charts.html) reads the live data from here.
 window.lifesimCharts = {
@@ -979,7 +1099,7 @@ for (const tab of document.querySelectorAll('.tabs [role=tab]')) {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('chartsOverlay').hidden) return setChartsOverlay(false);
-  if (e.target.matches('input[type=text], select')) return;
+  if (e.target.matches('input[type=text], input[type=number], select')) return;
   if (e.code === 'Space') {
     e.preventDefault();
     togglePause();

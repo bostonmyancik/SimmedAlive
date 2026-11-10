@@ -85,6 +85,12 @@
     font-size: 15px;
   }
   .banner button { display: block; margin: 10px auto 0; }
+  .buildbar {
+    bottom: 56px; left: 50%; transform: translateX(-50%); padding: 8px 10px 8px 14px; font-size: 13px;
+    display: flex; align-items: center; gap: 12px; max-width: calc(100% - 24px);
+  }
+  .buildbar[hidden] { display: none; }
+  .buildbar button { flex: none; border-color: var(--accent); }
 
   /* Sidebar */
   .sidebar {
@@ -168,6 +174,18 @@
   .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
   .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0 6px; cursor: pointer; }
   .check input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+  .founder { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px 10px; margin-bottom: 8px; }
+  .founder .top { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .founder input {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--bg); min-width: 0;
+    border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px;
+  }
+  .founder input[type=color] { flex: none; width: 30px; height: 28px; padding: 2px; cursor: pointer; }
+  .founder input[type=text] { flex: 1; }
+  .founder .top button { flex: none; padding: 4px 10px; font-size: 12px; }
+  .founder .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  .founder label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-secondary); }
+  .founder input[type=number] { width: 100%; }
   .seedrow { display: flex; gap: 8px; margin-bottom: 8px; }
   .seedrow input {
     flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg);
@@ -317,6 +335,10 @@
       Everything died.
       <button id="bannerNew">New world</button>
     </div>
+    <div class="float buildbar" id="buildBar" hidden>
+      <span id="buildText"></span>
+      <button id="release">Release the species</button>
+    </div>
   </section>
 
   <aside class="sidebar" id="sidebar">
@@ -434,6 +456,19 @@
       </div>
       <p class="hint">The same seed always builds the same world.</p>
       <div class="buttons"><button id="reset">New world</button></div>
+      <h2>Founding species</h2>
+      <p class="hint">Every new world starts with these species. Rename them, change their numbers and traits, add your own or remove some, then press New world or build a map below. The world already running is not affected.</p>
+      <div id="founders"></div>
+      <div class="buttons">
+        <button id="addFounder">Add a species</button>
+        <button id="resetFounders">Restore the originals</button>
+      </div>
+      <h2>Your own map</h2>
+      <p class="hint">Start from open land, or from this map with everything living on it cleared away. Paint it with the Terrain tool, then release the species. Either button ends the world now running; save it first if you want to keep it.</p>
+      <div class="buttons">
+        <button id="blankMap">Start a blank map</button>
+        <button id="editMap">Clear and edit this map</button>
+      </div>
       <h2>Saved worlds</h2>
       <p class="hint" id="saveStatus"></p>
       <div class="seedrow">
