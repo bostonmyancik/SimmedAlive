@@ -9,7 +9,7 @@ import { TRAITS, traitDistance, traitsOf, nameSpecies, colorForSpecies } from '.
 import { pack, unpack } from './pack.js';
 import {
   GRID_W, GRID_H, CELL, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN,
-  cellIndex, wrapDistance, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
+  YEAR_TICKS, cellIndex, wrapDistance, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
 } from './world.js';
 
 const BUCKET_SIZE = 40; // pixels; roughly a typical vision radius
@@ -33,6 +33,7 @@ const SAVE_VERSION = 1;
 const CREATURE_FIELDS = [
   'id', 'parentId', 'species', 'x', 'y', 'heading', 'energy', 'hydration', 'thirsty', 'age',
   'bornTick', 'generation', 'offspring', ...TRAITS, 'swimmer', 'detour', 'blocked', 'slide',
+  'carrying', 'sheltered',
 ];
 
 // Turns (in radians) a blocked creature tries, gentlest first, to slide past an obstacle.
@@ -47,6 +48,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
   const P = { ...DEFAULT_PARAMS, ...params };
   let random = mulberry32(seed);
   let nextCreatureId = 1;
+  let nextBaseId = 1;
 
   const sim = {
     seed,
@@ -64,6 +66,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
     food: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE),     // plants: { x, y, wet }
     carcasses: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE), // meat: { x, y, tick, wet }
     creatures: [],
+    // Camps, forts and castles:
+    // { id, species, x, y, builtTick, health, plants, meat, farming, castle, hitTick, usedTick, occupants }
+    bases: [],
     fronts: [],
     events: [],          // the event log: { tick, kind, species, text }
     tick: 0,
@@ -76,6 +81,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     fertility,
     isHostile,
     lineage,
+    baseInfo,
     heatWave: () => weather(9, 'heat', 'Heat wave'),
     coldSnap: () => weather(-9, 'cold', 'Cold snap'),
     drought,
@@ -113,6 +119,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.seed = newSeed;
     random = mulberry32(newSeed);
     nextCreatureId = 1;
+    nextBaseId = 1;
+    sim.bases = [];
     sim.food.clear();
     sim.carcasses.clear();
     carcassQueue = [];
@@ -273,6 +281,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
         carcass.wet = sim.water[cell] === 1;
       }
     }
+    for (const base of sim.bases) {
+      if (sim.blocked[cellIndex(base.x, base.y)]) destroyBase(base, 'A ' + baseLabel(base) + ' was lost when the land changed');
+    }
+    sweepBases();
   }
 
   // Paints terrain in a circle. `kind` is 'water', 'plain', 'fertile', 'desert' or 'mountain'.
@@ -330,6 +342,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
       }
     }
     for (const plant of [...sim.food]) if (within(plant, x, y, radius)) sim.food.remove(plant);
+    for (const base of sim.bases) {
+      if (!within(base, x, y, radius)) continue;
+      base.plants = base.meat = 0; // the store burns with it
+      destroyBase(base, 'A meteor destroyed a ' + baseLabel(base));
+    }
+    sweepBases();
     forCellsNear(x, y, radius * 0.7, (cell) => {
       if (!sim.water[cell] && sim.terrain[cell] !== MOUNTAIN) sim.terrain[cell] = DESERT;
     });
@@ -378,6 +396,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       fronts: sim.fronts.map((f) => ({ ...f })),
       species: sim.species.map((sp) => ({ ...sp, origin: { ...sp.origin } })),
       creatures: sim.creatures.map((c) => CREATURE_FIELDS.map((field) => c[field])),
+      nextBaseId,
+      bases: sim.bases.map((base) => ({ ...base })),
       food: [...sim.food].map((f) => [f.x, f.y]),
       carcasses: [...sim.carcasses].map((k) => [k.x, k.y, k.tick]),
       events: sim.events.map((e) => ({ ...e })),
@@ -413,8 +433,13 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.detour = c.detour || 0;
       c.blocked = c.blocked || 0;
       c.slide = c.slide ?? null;
+      c.carrying = c.carrying || 0; // saves from before bases existed
+      c.sheltered = !!c.sheltered;
       return c;
     });
+    nextBaseId = data.nextBaseId || 1;
+    sim.bases = (data.bases || []).map((base) => ({ ...base }));
+    indexBases();
 
     sim.food.clear();
     const wet = (x, y) => sim.water[cellIndex(x, y)] === 1;
@@ -516,6 +541,196 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }
   }
 
+  // ---------- Bases ----------
+
+  let basesOf = new Map(); // species id -> its standing bases; rebuilt every tick
+
+  // How grown a base is: 0 when new, 1 once it has stood for a year.
+  const baseGrowth = (base) => Math.min(1, (sim.tick - base.builtTick) / YEAR_TICKS);
+  // A [when new, when a year old] rule, at this base's age.
+  const grown = ([atStart, atYear], base) => Math.round(atStart + (atYear - atStart) * baseGrowth(base));
+  const storeRoom = (base) => base.plants + base.meat < grown(RULES.baseStore, base);
+  const baseStage = (base) => (baseGrowth(base) >= 1 ? 'castle' : baseGrowth(base) >= RULES.farmFromGrowth ? 'fort' : 'camp');
+  const baseLabel = (base) => sim.species[base.species].name + ' ' + baseStage(base);
+
+  // What a base amounts to at its present age, for the page to show.
+  function baseInfo(base) {
+    return {
+      growth: baseGrowth(base),
+      stage: baseStage(base),
+      shelter: grown(RULES.baseShelter, base),
+      store: grown(RULES.baseStore, base),
+      maxHealth: grown(RULES.baseHealth, base),
+      underAttack: base.hitTick !== null && sim.tick - base.hitTick < RULES.baseRepairDelay,
+    };
+  }
+
+  function indexBases() {
+    basesOf = new Map();
+    for (const base of sim.bases) {
+      if (!basesOf.has(base.species)) basesOf.set(base.species, []);
+      basesOf.get(base.species).push(base);
+    }
+  }
+
+  // Decides who is sheltering this tick: members standing at their own base,
+  // up to as many as it holds. Needs the creature grid to be current.
+  function shelterCreatures() {
+    indexBases();
+    for (const base of sim.bases) {
+      const room = grown(RULES.baseShelter, base);
+      base.occupants = 0;
+      creatureGrid.forEachNear(base.x, base.y, RULES.baseRadius, (c) => {
+        if (c.species !== base.species || c.sheltered || c.energy <= 0 || base.occupants >= room) return;
+        c.sheltered = true;
+        base.occupants++;
+      });
+      if (base.occupants) base.usedTick = sim.tick;
+    }
+  }
+
+  // The creature's nearest own base within hauling distance, or null.
+  function homeBase(c) {
+    const own = basesOf.get(c.species);
+    if (!own) return null;
+    let best = null, bestSq = RULES.haulRange * RULES.haulRange;
+    for (const base of own) {
+      const distSq = (base.x - c.x) * (base.x - c.x) + (base.y - c.y) * (base.y - c.y);
+      if (distSq < bestSq && base.health > 0) {
+        bestSq = distSq;
+        best = base;
+      }
+    }
+    return best;
+  }
+
+  // The nearest standing enemy base closer than sqrt(maxDistSq), or null.
+  // With `stocked`, only bases that have food in store count.
+  function enemyBase(c, maxDistSq, stocked) {
+    let best = null;
+    for (const base of sim.bases) {
+      if (base.health <= 0 || !isHostile(c.species, base.species)) continue;
+      if (stocked && base.plants + base.meat === 0) continue;
+      const distSq = (base.x - c.x) * (base.x - c.x) + (base.y - c.y) * (base.y - c.y);
+      if (distSq < maxDistSq) {
+        maxDistSq = distSq;
+        best = base;
+      }
+    }
+    return best;
+  }
+
+  function addCarcass(x, y) {
+    const carcass = { x, y, tick: sim.tick, eaten: false, wet: sim.water[cellIndex(x, y)] === 1 };
+    sim.carcasses.add(carcass);
+    carcassQueue.push(carcass);
+  }
+
+  // Brings a base down. Whatever was in its store spills onto the ground.
+  // The base stays in sim.bases, marked by zero health, until sweepBases().
+  function destroyBase(base, text) {
+    for (let i = 0; i < base.plants + base.meat; i++) {
+      const angle = random() * 6.283, distance = Math.sqrt(random()) * RULES.baseRadius;
+      const x = (base.x + Math.cos(angle) * distance + WIDTH) % WIDTH;
+      const y = clamp(base.y + Math.sin(angle) * distance, 0, HEIGHT - 1);
+      if (sim.terrain[cellIndex(x, y)] === MOUNTAIN) continue;
+      if (i < base.plants) addFood(x, y);
+      else addCarcass(x, y);
+    }
+    base.plants = base.meat = 0;
+    base.health = 0;
+    logEvent('razed', text, base.species);
+  }
+
+  function sweepBases() {
+    if (sim.bases.some((base) => base.health <= 0)) sim.bases = sim.bases.filter((base) => base.health > 0);
+  }
+
+  // Whether a base could go where this creature stands: on walkable land with
+  // a route to water, in a climate the creature likes, clear of other bases.
+  function goodSite(c) {
+    const cell = cellIndex(c.x, c.y);
+    if (!habitable(cell) || Math.abs(sim.temperature[cell] - c.preferredTemp) > P.tempTolerance) return false;
+    return !sim.bases.some((base) => within(base, c.x, c.y, RULES.baseSpacing));
+  }
+
+  // Each species with the numbers for another base looks for a spot where
+  // plenty of its members live, and builds there.
+  function foundBases() {
+    const held = (sp) => (basesOf.get(sp.id) || []).length;
+    const builders = sim.species.filter((sp) => sp.established && sp.count > 0
+      && held(sp) < Math.min(P.maxBases, Math.floor(sp.count / P.basePopulation)));
+    if (!builders.length) return;
+    const members = new Map(builders.map((sp) => [sp.id, []]));
+    for (const c of sim.creatures) members.get(c.species)?.push(c);
+
+    for (const sp of builders) {
+      const list = members.get(sp.id);
+      let site = null, mostKin = RULES.baseMinNeighbours;
+      for (let i = 0; i < 12 && list.length; i++) {
+        const c = list[Math.floor(random() * list.length)];
+        if (!goodSite(c)) continue;
+        let kin = -1; // not counting itself
+        creatureGrid.forEachNear(c.x, c.y, RULES.baseNeighbourRange, (o) => { if (o.species === sp.id && o.energy > 0) kin++; });
+        if (kin >= mostKin) {
+          mostKin = kin + 1;
+          site = c;
+        }
+      }
+      if (!site) continue;
+      sim.bases.push({
+        id: nextBaseId++, species: sp.id, x: site.x, y: site.y, builtTick: sim.tick, health: RULES.baseHealth[0],
+        plants: 0, meat: 0, farming: false, castle: false, hitTick: null, usedTick: sim.tick, occupants: 0,
+      });
+      logEvent('base', sp.name + ' built a camp', sp.id);
+    }
+  }
+
+  // A farming base raises a plant somewhere in its fields.
+  function farm(base) {
+    const angle = random() * 6.283, distance = Math.sqrt(random()) * RULES.farmRadius;
+    const x = (base.x + Math.cos(angle) * distance + WIDTH) % WIDTH;
+    const y = clamp(base.y + Math.sin(angle) * distance, 0, HEIGHT - 1);
+    const cell = cellIndex(x, y);
+    if (sim.blocked[cell] || sim.food.bucketAt(x, y).length >= RULES.maxFoodNearby) return;
+    const chance = Math.min(1, RULES.farmBaseChance + fertility(cell)) * (inDrought() ? RULES.droughtFoodFactor : 1);
+    if (random() < chance) addFood(x, y);
+  }
+
+  // Once per tick: bases are repaired, grow, farm, fall out of use, and new ones are built.
+  function updateBases() {
+    const check = sim.tick % RULES.baseCheckEvery === 0;
+    for (const base of sim.bases) {
+      if (base.health <= 0) continue;
+      const sp = sim.species[base.species];
+      if (sp.count === 0) {
+        destroyBase(base, 'A ' + baseLabel(base) + ' fell into ruin');
+        continue;
+      }
+      if (sim.tick - base.usedTick > RULES.baseAbandonAfter) {
+        destroyBase(base, sp.name + ' abandoned a ' + baseStage(base));
+        continue;
+      }
+      if (base.hitTick === null || sim.tick - base.hitTick > RULES.baseRepairDelay) {
+        base.health = Math.min(grown(RULES.baseHealth, base), base.health + RULES.baseRepair);
+      }
+      if (!base.castle && baseGrowth(base) >= 1) {
+        base.castle = true;
+        logEvent('base', 'A ' + sp.name + ' fort grew into a castle', sp.id);
+      }
+      if (check && !base.farming && baseGrowth(base) >= RULES.farmFromGrowth && random() < P.farmChance) {
+        base.farming = true;
+        logEvent('base', sp.name + ' took up farming at a ' + baseStage(base), sp.id);
+      }
+      if (base.farming && (sim.tick + base.id) % RULES.farmEvery === 0) farm(base);
+    }
+    sweepBases();
+    if (check) {
+      indexBases();
+      foundBases();
+    }
+  }
+
   // ---------- A creature's turn ----------
 
   // Points a thirsty creature at the neighbouring cell closest to water.
@@ -597,7 +812,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
   function act(c, born, mutationRate) {
     const cell = cellIndex(c.x, c.y);
     const temp = sim.temperature[cell];
-    const stress = Math.max(0, Math.abs(temp - c.preferredTemp) - P.tempTolerance);
+    // A creature sheltering in its base is spared some of the cold.
+    const outdoorStress = Math.max(0, Math.abs(temp - c.preferredTemp) - P.tempTolerance);
+    const cold = temp < c.preferredTemp;
+    const stress = c.sheltered && cold ? Math.max(0, outdoorStress - RULES.baseWarmth) : outdoorStress;
 
     // What can it see? (Sight does not cross the east-west wrap.)
     const visionSq = c.vision * c.vision;
@@ -618,11 +836,49 @@ export function createSim({ seed = 1, params = {} } = {}) {
     const mealDistSq = meal ? distSqTo(meal) : visionSq;
 
     // Fight any enemy within reach. Meat-eaters bite harder; everyone hits
-    // weaker outside their climate.
+    // weaker outside their climate. A creature sheltering in its base is
+    // harder to hurt. With no enemy in reach, tear at an enemy base instead.
+    const damage = P.combatDamage * c.strength * (1 + P.dietDamageBonus * c.diet)
+      * (stress > 0 ? P.awayDamageFactor : 1);
     if (enemy && enemyDistSq < RULES.attackRangeSq) {
-      enemy.energy -= P.combatDamage * c.strength * (1 + P.dietDamageBonus * c.diet)
-        * (stress > 0 ? P.awayDamageFactor : 1);
+      enemy.energy -= damage * (enemy.sheltered ? RULES.baseDefense : 1);
       if (enemy.energy <= 0) sim.species[c.species].kills++;
+    } else if (sim.bases.length) {
+      const target = enemyBase(c, RULES.baseReachSq, false);
+      if (target) {
+        target.health -= damage;
+        target.hitTick = sim.tick;
+        if (target.health <= 0) destroyBase(target, sim.species[c.species].name + ' destroyed a ' + baseLabel(target));
+      }
+    }
+
+    // At home: drop off what it is carrying, and eat from the store if hungry.
+    const home = basesOf.size ? homeBase(c) : null;
+    const homeDistSq = home ? distSqTo(home) : 0;
+    const atHome = home && homeDistSq < RULES.baseRadius * RULES.baseRadius;
+    const carriedWorth = c.carrying === 2 ? meatWorth : plantWorth;
+    if (atHome) {
+      if (c.carrying && storeRoom(home)) {
+        if (c.carrying === 2) home.meat++;
+        else home.plants++;
+        c.carrying = 0;
+      }
+      if (c.energy < RULES.storeEatBelow) {
+        const fromMeat = home.meat ? meatWorth : 0, fromPlants = home.plants ? plantWorth : 0;
+        if (fromMeat > fromPlants) {
+          home.meat--;
+          c.energy += meatWorth;
+        } else if (fromPlants > 0) {
+          home.plants--;
+          c.energy += plantWorth;
+        }
+      }
+    }
+    // It eats what it carries if it gets hungry, has no base left to take it
+    // to, or found the store full.
+    if (c.carrying && (c.energy < RULES.carryEatBelow || !home || atHome)) {
+      c.energy += carriedWorth;
+      c.carrying = 0;
     }
 
     if (c.hydration < RULES.thirstyBelow) c.thirsty = true;
@@ -642,9 +898,17 @@ export function createSim({ seed = 1, params = {} } = {}) {
       && enemy.strength < c.strength * RULES.huntStrengthRatio
       && c.energy < P.huntEnergy * 2 * c.diet
       && (!meal || enemyDistSq < mealDistSq);
+    // Residents charge any enemy that comes up to their base, however strong.
+    const guardSq = RULES.baseGuardRange * RULES.baseGuardRange;
+    const defending = home && enemy && !c.thirsty && homeDistSq < 4 * guardSq
+      && (enemy.x - home.x) * (enemy.x - home.x) + (enemy.y - home.y) * (enemy.y - home.y) < guardSq;
+    const headFor = (target) => { c.heading = Math.atan2(target.y - c.y, target.x - c.x); };
+    let raid = null;
 
     if (swimming && !c.swimmer && headTowardLand(c, cell)) {
       // Out of its depth: make for the shore before anything else.
+    } else if (defending) {
+      headFor(enemy);
     } else if (mustFlee) {
       c.heading = Math.atan2(c.y - enemy.y, c.x - enemy.x);
     } else if (c.thirsty) {
@@ -655,25 +919,41 @@ export function createSim({ seed = 1, params = {} } = {}) {
         headTowardWater(c, cell);
       }
     } else if (canHunt) {
-      c.heading = Math.atan2(enemy.y - c.y, enemy.x - c.x);
+      headFor(enemy);
+    } else if (c.carrying) {
+      headFor(home); // take it to the store
     } else if (meal) {
-      c.heading = Math.atan2(meal.y - c.y, meal.x - c.x);
+      headFor(meal);
       if (mealDistSq < Math.max(RULES.minEatRangeSq, c.speed * c.speed)) {
         if (meal === carcass) {
           sim.carcasses.remove(meal);
           meal.eaten = true;
-          c.energy += meatWorth;
         } else {
           sim.food.remove(meal);
-          c.energy += plantWorth;
         }
+        // A well-fed creature with a base nearby carries the food home to
+        // store; otherwise it eats it on the spot.
+        if (home && c.energy > RULES.carryAboveEnergy && storeRoom(home)) c.carrying = meal === carcass ? 2 : 1;
+        else c.energy += meal === carcass ? meatWorth : plantWorth;
         // Got what it was after: no need to keep working round anything.
         c.blocked = 0;
         c.slide = null;
         c.detour = 0;
       }
+    } else if (home && c.energy < RULES.storeEatBelow && (home.plants && plantWorth > 0 || home.meat && meatWorth > 0)) {
+      headFor(home); // hungry, nothing in sight: go and eat from the store
+    } else if (c.energy < RULES.raidBelowEnergy && sim.bases.length && (raid = enemyBase(c, visionSq, true))) {
+      headFor(raid); // hungry, and an enemy base has food: go and break it open
     } else if (stress > 0) {
-      headTowardComfort(c);
+      // Too cold: make for the base if it has room, otherwise for warmer land.
+      if (cold && home && (c.sheltered || home.occupants < grown(RULES.baseShelter, home))) {
+        if (atHome && c.sheltered) move = 0;
+        else headFor(home);
+      } else {
+        headTowardComfort(c);
+      }
+    } else if (c.sheltered && outdoorStress > 0 && c.energy >= RULES.storeEatBelow) {
+      move = 0; // comfortable indoors, cold outside: stay put
     } else {
       c.heading += (random() - 0.5) * 0.5; // wander
     }
@@ -752,7 +1032,11 @@ export function createSim({ seed = 1, params = {} } = {}) {
     rotCarcasses();
 
     creatureGrid.clear();
-    for (const c of sim.creatures) creatureGrid.add(c);
+    for (const c of sim.creatures) {
+      c.sheltered = false;
+      creatureGrid.add(c);
+    }
+    shelterCreatures();
 
     const born = [];
     for (const c of sim.creatures) {
@@ -766,14 +1050,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
       if (c.energy > 0 && c.hydration > 0 && c.age < RULES.maxAge) {
         survivors.push(c);
       } else {
-        const carcass = { x: c.x, y: c.y, tick: sim.tick, eaten: false, wet: sim.water[cellIndex(c.x, c.y)] === 1 };
-        sim.carcasses.add(carcass);
-        carcassQueue.push(carcass);
+        addCarcass(c.x, c.y);
+        if (c.carrying === 1) addFood(c.x, c.y); // it drops the plant it was carrying
       }
     }
     sim.creatures = survivors.concat(born);
     sim.tick++;
     countSpecies();
+    updateBases();
   }
 
   // Average traits, share of swimmers and highest generation for every species, indexed like

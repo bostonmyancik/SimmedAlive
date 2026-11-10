@@ -29,6 +29,8 @@ export function spawnCreature(id, species, traits, x, y, swimmerShare, random) {
     detour: 0,  // ticks left of holding course around an obstacle
     blocked: 0, // how many detours in a row it has needed
     slide: null, // the compass heading it is following round the obstacle, if any
+    carrying: 0, // food being carried home: 0 nothing, 1 a plant, 2 meat
+    sheltered: false, // inside its species' base this tick
   };
 }
 
@@ -62,5 +64,7 @@ export function makeOffspring(id, parent, tick, mutationRate, params, random) {
     detour: 0,
     blocked: 0,
     slide: null,
+    carrying: 0,
+    sheltered: false,
   };
 }

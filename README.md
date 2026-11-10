@@ -25,14 +25,14 @@ source .venv/bin/activate && python3 app.py
 
 - **Map**: drag to pan (the world wraps around east-west), scroll or pinch to zoom, or use the + / − / Fit buttons.
 - **Tools** (left rail, keys `1` to `6`):
-  - Select inspects the creature you click.
+  - Select inspects the creature or base you click.
   - Food scatters plants as you drag.
   - Terrain paints water, fertile land, plain, desert or mountain.
   - Warm and Cool change the temperature of an area; the change fades over a few thousand ticks.
   - Meteor strikes where you click: everything in the circle dies and the land is scorched.
   - With a brush tool active, pan by dragging with the right or middle button, or with two fingers.
 - **Layers** (top of the map): terrain (fertile land, plain, desert, mountains), temperature, fertility (how readily food grows), or territory (which species dominates each area).
-- **On the map**: green dots are plants, crosses are carcasses, a blue ring means thirsty, and a bigger body means stronger. Mountains and water block movement.
+- **On the map**: green dots are plants, crosses are carcasses, a blue ring means thirsty, and a bigger body means stronger. Mountains and water block movement. A tent, fort or castle in a species' colour is one of its bases: the shaded circle is the ground it shelters, a dashed green ring marks its fields, the green bar is its food store and a red bar appears when its walls are damaged. A dot on a creature's back is food it is carrying home.
 - **Sidebar tabs**: Species (every living species; click a card's header to fold it down to its name and population, or use Collapse all), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree; "Open in a window" or "Expand here" shows every chart at once, large, with a readout of each species' value under the pointer), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
 - **Timeline** (across the bottom): each species' share of the population over the last 16,000 ticks, with marks for new species, extinctions, booms, crashes and disasters. Hover to read the tick and any event there. Drag it to rewind: the world jumps back to that moment and pauses. You can scrub back and forth, or press "Back to now". Pressing Resume, or changing the world, continues from where you are and drops what came after. Rewinding reaches back to the start of the timeline, or to when the page was last loaded if that is more recent.
 - **Bottom bar**: pause (or Space), speed, and the tick, year and season.
@@ -83,7 +83,13 @@ python3 -m unittest discover tests
 - **Swimming.** A share of creatures (20% by default, set in Settings) are born able to swim. Swimmers cross water, more slowly and at an energy cost, and reach the plants that grow in it; everyone else goes around. Swimming is a matter of chance at birth, not inherited.
 - **Getting around obstacles.** A creature blocked by water or mountains slides along the edge and holds that course for a while before heading for its target again, so it works its way round instead of pacing in front of it. A creature caught under newly painted water or mountains can always walk out.
 - **Speciation.** Traits mutate at each birth. A newborn that has drifted too far from its species' founder joins a closely related species it resembles, or founds a new one. A species and the one it split from do not fight; all other species do. A new species is announced once it has 10 members.
-- **Events.** The sim logs new species, extinctions, booms and crashes (a population doubling or halving between checks), and every disaster.
+- **Bases.** A species builds a camp once it has 120 members, a second at 240 and a third at 360, never more than three. A camp goes where plenty of its members live, in a climate they like, and no closer than 150 pixels to any other base. It grows steadily, becoming a fort and, after a full year, a castle; along the way the number of creatures it shelters rises from 6 to 30, its food store from 20 meals to 80, and its walls get stronger.
+  - *Shelter.* Members standing at their base, up to as many as it holds, are spared 10 degrees of cold and take half damage. In the cold, members head for a base that has room and stay there.
+  - *Storing food.* A well-fed member near a base carries the food it finds home instead of eating it, until the store is full. Hungry members eat from the store. A species that hoards grows more slowly at first but has a reserve for droughts and winters.
+  - *Farming.* A fort or castle may take up farming (on average after about half a year); plants then sprout in the fields around it.
+  - *Attack and defence.* Hungry creatures that see an enemy base with food in it go for it, and any creature at the middle of an enemy base tears at its walls. Members charge any enemy that comes up to their base. A base that falls spills its store on the ground for anyone to eat. Walls are repaired when left alone for a while.
+  - *Loss.* A base is also lost if nobody shelters there for 3,000 ticks, if its species dies out, if a meteor hits it, or if water or mountains are painted over it.
+- **Events.** The sim logs bases built, grown, farmed and lost, new species, extinctions, booms and crashes (a population doubling or halving between checks), and every disaster.
 - **Disasters.** A drought cuts plant growth and raises thirst for 2,500 ticks. A plague kills about 60% of the most numerous species. A meteor kills everything within 90 pixels.
 
 ## Tuning
@@ -114,5 +120,8 @@ The balance settings are `DEFAULT_PARAMS`:
 | `autoDisasters` | Whether disasters strike by themselves (the "Random disasters" switch) |
 | `autoDisasterEvery` | Average ticks between random disasters |
 | `speciationDistance` | How far traits must drift from a species' founder before a lineage splits off |
+| `basePopulation` | Members a species needs for each base it holds |
+| `maxBases` | Most bases one species can hold (0 turns bases off) |
+| `farmChance` | Chance, every 100 ticks, that a fort or castle takes up farming |
 
-Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths) are in `RULES` in the same file.
+Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths, and the sizes, ranges and thresholds for bases) are in `RULES` in the same file.

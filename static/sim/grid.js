@@ -79,6 +79,21 @@ export class SpatialGrid {
     return best;
   }
 
+  // Calls visit(item) for every item within `radius` of (x, y).
+  forEachNear(x, y, radius, visit) {
+    const col0 = this.col(x - radius), col1 = this.col(x + radius);
+    const row0 = this.row(y - radius), row1 = this.row(y + radius);
+    const radiusSq = radius * radius;
+    for (let r = row0; r <= row1; r++) {
+      for (let c = col0; c <= col1; c++) {
+        for (const item of this.buckets[r * this.cols + c]) {
+          const dx = item.x - x, dy = item.y - y;
+          if (dx * dx + dy * dy <= radiusSq) visit(item);
+        }
+      }
+    }
+  }
+
   *[Symbol.iterator]() {
     for (const bucket of this.buckets) yield* bucket;
   }
