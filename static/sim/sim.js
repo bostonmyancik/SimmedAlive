@@ -605,6 +605,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
       store: grown(RULES.baseStore, base),
       maxHealth: grown(RULES.baseHealth, base),
       underAttack: base.hitTick !== null && sim.tick - base.hitTick < RULES.baseRepairDelay,
+      // Ticks until it next raises newcomers (0 if it is only waiting to be repaired).
+      spawnIn: Math.max(0, (base.spawnTick ?? base.builtTick) + RULES.baseSpawnEvery - sim.tick),
+      canSpawn: base.health >= grown(RULES.baseHealth, base) * RULES.baseSpawnHealth,
     };
   }
 
@@ -724,6 +727,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       sim.bases.push({
         id: nextBaseId++, species: sp.id, x: site.x, y: site.y, builtTick: sim.tick, health: RULES.baseHealth[0],
         plants: 0, meat: 0, farming: false, castle: false, hitTick: null, usedTick: sim.tick, occupants: 0,
+        spawnTick: sim.tick,
       });
       logEvent('base', sp.name + ' built a camp', sp.id);
     }
@@ -740,8 +744,27 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (random() < chance) addFood(x, y);
   }
 
-  // Once per tick: bases are repaired, grow, farm, fall out of use, and new ones are built.
-  function updateBases() {
+  // A base in good repair raises newcomers: young of its species, each taking
+  // after a living member picked at random, who start out at the base.
+  function raiseNewcomers(base, mutationRate) {
+    const members = sim.creatures.filter((c) => c.species === base.species);
+    if (!members.length) return;
+    for (let i = 0; i < grown(RULES.baseSpawn, base) && sim.creatures.length < RULES.maxCreatures; i++) {
+      const parent = members[Math.floor(random() * members.length)];
+      const child = makeOffspring(nextCreatureId++, parent, sim.tick, mutationRate, P, random);
+      child.species = base.species;
+      child.x = base.x;
+      child.y = base.y;
+      child.energy = RULES.startEnergy;
+      child.hydration = 100;
+      sim.creatures.push(child);
+      sim.species[base.species].count++;
+    }
+  }
+
+  // Once per tick: bases are repaired, grow, farm, raise newcomers, fall out
+  // of use, and new ones are built.
+  function updateBases(mutationRate) {
     const check = sim.tick % RULES.baseCheckEvery === 0;
     for (const base of sim.bases) {
       if (base.health <= 0) continue;
@@ -766,6 +789,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
         logEvent('base', sp.name + ' took up farming at a ' + baseStage(base), sp.id);
       }
       if (base.farming && (sim.tick + base.id) % RULES.farmEvery === 0) farm(base);
+      // The wait is not reset while the walls are down: it raises them as soon as it is repaired.
+      if (sim.tick - (base.spawnTick ?? base.builtTick) >= RULES.baseSpawnEvery
+          && base.health >= grown(RULES.baseHealth, base) * RULES.baseSpawnHealth) {
+        base.spawnTick = sim.tick;
+        raiseNewcomers(base, mutationRate);
+      }
     }
     sweepBases();
     if (check) {
@@ -1100,7 +1129,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.creatures = survivors.concat(born);
     sim.tick++;
     countSpecies();
-    updateBases();
+    updateBases(mutationRate);
   }
 
   // Average traits, share of swimmers and highest generation for every species, indexed like

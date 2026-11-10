@@ -195,6 +195,8 @@ function refreshBaseInspector() {
   $('baseBuilt').textContent = 'Tick ' + fmt(base.builtTick);
   $('basePlants').textContent = fmt(base.plants);
   $('baseMeat').textContent = fmt(base.meat);
+  $('baseNewcomers').textContent = !info.canSpawn ? 'None until the walls are above half strength'
+    : info.spawnIn ? 'In ' + fmt(info.spawnIn) + ' ticks' : 'Any moment';
   $('baseFarming').textContent = base.farming ? 'Yes' : info.stage === 'camp' ? 'Not yet (camps cannot)' : 'Not yet';
 }
 

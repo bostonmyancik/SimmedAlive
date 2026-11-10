@@ -131,6 +131,9 @@ export const RULES = {
   baseDefense: 0.5,            // damage multiplier for a creature sheltering in its base
   baseWarmth: 10,              // degrees of cold a sheltering creature is spared
   baseGuardRange: 45,          // an enemy this close to a base is charged by its residents
+  baseSpawnEvery: 2500,        // ticks between the newcomers a base in good repair raises
+  baseSpawnHealth: 0.5,        // share of its full health a base needs to raise them
+  baseSpawn: [1, 3],           // newcomers raised each time
   baseAbandonAfter: 3000,      // ticks with nobody sheltering before a base is abandoned
   haulRange: 220,              // creatures this close to a base treat it as home
   carryAboveEnergy: 80,        // a creature this well fed carries food home instead of eating it
