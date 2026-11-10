@@ -368,5 +368,75 @@
   </footer>
 </div>
 <script type="module" src="{{ url_for('static', filename='ui/main.js') }}"></script>
+    --bg: #faf9f5; --surface: #f0eee6; --text: #1f1e1d; --text-secondary: #5f5e5a;
+    --text-muted: #888780; --border: #d3d1c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1f1e1d; --surface: #2c2c2a; --text: #f1efe8; --text-secondary: #b4b2a9;
+      --text-muted: #888780; --border: #444441;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 40px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
+  }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 12px; }
+  canvas { display: block; width: 100%; }
+  #world { border: 1px solid var(--border); border-radius: 12px; cursor: crosshair; }
+  #hist { height: 110px; margin-bottom: 18px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; font-size: 13px; color: var(--text-secondary); margin: 10px 0 14px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card { background: var(--surface); border-radius: 8px; padding: 12px 16px; }
+  .label { font-size: 13px; color: var(--text-secondary); }
+  .big { font-size: 26px; font-weight: 500; }
+  .detail { font-size: 12px; color: var(--text-secondary); }
+  .caption { font-size: 13px; color: var(--text-secondary); margin-bottom: 2px; }
+  .row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .row label { font-size: 14px; color: var(--text-secondary); min-width: 110px; }
+  .row input { flex: 1; accent-color: #7F77DD; }
+  .row output { font-size: 14px; font-weight: 500; min-width: 44px; text-align: right; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  button {
+    font: inherit; font-size: 14px; color: var(--text); background: transparent;
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; cursor: pointer;
+  }
+  button:hover { background: var(--surface); }
+  button:active { transform: scale(0.98); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Life sim</h1>
+  <canvas id="world"></canvas>
+  <div class="legend">
+    <span><span class="sw" style="background:#185FA5"></span>Water</span>
+    <span><span class="sw" style="background:#F09595"></span>Hot</span>
+    <span><span class="sw" style="background:#B5D4F4"></span>Cold</span>
+    <span><span class="dot" style="background:#639922;width:6px;height:6px"></span>Food</span>
+    <span>Bigger body = stronger</span>
+    <span>Blue ring = thirsty</span>
+    <span>Click the map to drop food</span>
+  </div>
+  <div id="cards"></div>
+  <div class="caption">Population of each species over time</div>
+  <canvas id="hist"></canvas>
+  <div class="row"><label for="fRate">Food supply</label><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"><output id="fOut">1.0</output></div>
+  <div class="row"><label for="mut">Mutation rate</label><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"><output id="mutOut">0.4</output></div>
+  <div class="row"><label for="spd">Time speed</label><input type="range" id="spd" min="0" max="6" step="1" value="4"><output id="spdOut">4x</output></div>
+  <div class="buttons">
+    <button id="heat">Heat wave</button>
+    <button id="cold">Cold snap</button>
+    <button id="tmp">Hide temperature</button>
+    <button id="pause">Pause</button>
+    <button id="reset">New world</button>
+  </div>
+</main>
+<script src="{{ url_for('static', filename='core.js') }}"></script>
+<script src="{{ url_for('static', filename='ui.js') }}"></script>
 </body>
 </html>
