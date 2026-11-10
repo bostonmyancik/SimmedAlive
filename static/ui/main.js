@@ -59,6 +59,7 @@ let following = false;     // keep the camera on the selected creature
 let history = [];          // samples: { tick, counts, traits }
 let debt = 0;              // fractional ticks owed to the simulation
 let frameCount = 0;
+let meteorDrawnAt = -1;    // tick of the newest meteor whose scorch mark is drawn
 let eventsShown = -1;      // fingerprint of the event list already rendered
 
 // Species worth showing: founders, and new ones once they have taken hold.
@@ -224,6 +225,11 @@ function refreshEvents() {
   const key = newest * 1000 + sim.events.length;
   if (key === eventsShown) return;
   eventsShown = key;
+  // A meteor that struck by itself has scorched the land, so redraw the terrain.
+  if (sim.events.some((e) => e.kind === 'meteor' && e.tick > meteorDrawnAt)) {
+    meteorDrawnAt = newest;
+    map.paintWorld();
+  }
   $('eventsEmpty').hidden = sim.events.length > 0;
   $('events').innerHTML = sim.events.slice().reverse().map((e) =>
     '<li class="' + e.kind + '"><span class="pip"></span><span class="when">Tick ' + fmt(e.tick) + '</span><span>' + e.text + '</span></li>').join('');
@@ -286,9 +292,10 @@ function refreshMarkers() {
   $('future').style.right = (100 - timelinePercent(latestTick)) + '%';
 }
 
-// The swimmer share lives in the world's settings, so a loaded or rewound
-// world brings its own value back to the slider.
-function refreshSwimSlider() {
+// The swimmer share and random disasters are part of the world's settings, so
+// a loaded or rewound world brings its own values back to the controls.
+function refreshWorldSettings() {
+  $('autoDisasters').checked = !!sim.params.autoDisasters;
   if (document.activeElement === $('swimShare')) return;
   const percent = Math.round(sim.params.swimmerShare * 100);
   $('swimShare').value = percent;
@@ -296,7 +303,7 @@ function refreshSwimSlider() {
 }
 
 function refreshAll() {
-  refreshSwimSlider();
+  refreshWorldSettings();
   refreshSpecies();
   refreshInspector();
   refreshEvents();
@@ -387,6 +394,7 @@ function showWorld(savedHistory = []) {
   $('cards').textContent = '';
   debt = 0;
   eventsShown = -1;
+  meteorDrawnAt = sim.tick;
   select(null);
   $('seedInput').value = sim.seed;
   // Keep the address bar shareable.
@@ -459,6 +467,7 @@ function goTo(target, exact) {
   if (exact) while (sim.tick < target && sim.creatures.length) sim.step(from.foodRate, from.mutationRate);
 
   eventsShown = -1;
+  meteorDrawnAt = sim.tick;
   select(null);
   map.paintWorld();
   map.paintLayer();
@@ -842,6 +851,10 @@ $('mut').oninput = (e) => ($('mutOut').textContent = (+e.target.value).toFixed(1
 $('swimShare').oninput = (e) => {
   sim.params.swimmerShare = +e.target.value / 100;
   $('swimOut').textContent = e.target.value + '%';
+  worldEdited = true;
+};
+$('autoDisasters').onchange = (e) => {
+  sim.params.autoDisasters = e.target.checked;
   worldEdited = true;
 };
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');

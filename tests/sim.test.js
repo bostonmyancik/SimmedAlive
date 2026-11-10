@@ -592,3 +592,42 @@ test('plants do not pile up where nothing eats them', () => {
   for (const bucket of sim.food.buckets) assert.ok(bucket.length <= RULES.maxFoodNearby);
   for (const f of sim.food) assert.ok(sim.waterDistance[cellIndex(f.x, f.y)] < 1e8, 'a plant grew on land cut off from water');
 });
+
+// ---------- Random disasters ----------
+
+test('auto mode strikes with every kind of disaster, and never when it is off', () => {
+  const kinds = (params) => {
+    const sim = createSim({ seed: 3, params });
+    sim.generate();
+    for (let i = 0; i < 6000; i++) sim.step(1, 0.4);
+    const wanted = ['heat', 'cold', 'plague', 'meteor'];
+    return new Set(sim.events.filter((e) => wanted.includes(e.kind) || e.text === 'A drought began').map((e) => e.kind));
+  };
+  assert.deepEqual([...kinds({ autoDisasters: true, autoDisasterEvery: 60 })].sort(), ['cold', 'drought', 'heat', 'meteor', 'plague']);
+  assert.equal(kinds({ autoDisasters: false, autoDisasterEvery: 60 }).size, 0);
+  assert.equal(kinds({}).size, 0, 'auto mode should be off unless asked for');
+});
+
+test('auto mode is rare by default and repeats exactly for the same seed', () => {
+  const disasters = () => {
+    const sim = createSim({ seed: 12, params: { autoDisasters: true } });
+    sim.generate();
+    for (let i = 0; i < 30000; i++) sim.step(1, 0.4);
+    return sim.events.filter((e) => ['heat', 'cold', 'plague', 'meteor'].includes(e.kind) || e.text === 'A drought began');
+  };
+  const first = disasters();
+  assert.ok(first.length <= 8, 'struck ' + first.length + ' times in 30,000 ticks');
+  assert.deepEqual(disasters(), first);
+});
+
+test('droughts from auto mode do not overlap', () => {
+  const sim = createSim({ seed: 4, params: { autoDisasters: true, autoDisasterEvery: 20 } });
+  sim.generate();
+  let last = -Infinity;
+  for (let i = 0; i < 6000; i++) sim.step(0, 0);
+  for (const e of sim.events) {
+    if (e.text !== 'A drought began') continue;
+    assert.ok(e.tick - last >= RULES.droughtLength, 'a drought began during another');
+    last = e.tick;
+  }
+});

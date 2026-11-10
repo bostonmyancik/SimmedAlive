@@ -36,7 +36,7 @@ source .venv/bin/activate && python3 app.py
 - **Sidebar tabs**: Species (every living species; click a card's header to fold it down to its name and population, or use Collapse all), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
 - **Timeline** (across the bottom): each species' share of the population over the last 16,000 ticks, with marks for new species, extinctions, booms, crashes and disasters. Hover to read the tick and any event there. Drag it to rewind: the world jumps back to that moment and pauses. You can scrub back and forth, or press "Back to now". Pressing Resume, or changing the world, continues from where you are and drops what came after. Rewinding reaches back to the start of the timeline, or to when the page was last loaded if that is more recent.
 - **Bottom bar**: pause (or Space), speed, and the tick, year and season.
-- **Settings**: food supply, mutation rate, the share born able to swim, disasters (heat wave, cold snap, drought, plague), the world seed, and saved worlds. The running world is autosaved every five seconds and picked up again when the page loads, so a refresh or restart loses at most a few seconds. You can also save worlds under a name and load or delete them later. A loaded world carries on exactly where it left off, charts included. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared. Opening an address whose seed differs from the autosave starts that world fresh.
+- **Settings**: food supply, mutation rate, the share born able to swim, disasters (heat wave, cold snap, drought, plague, and a "Random disasters" switch that lets them and meteors strike by themselves about once a year), the world seed, and saved worlds. The running world is autosaved every five seconds and picked up again when the page loads, so a refresh or restart loses at most a few seconds. You can also save worlds under a name and load or delete them later. A loaded world carries on exactly where it left off, charts included. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared. Opening an address whose seed differs from the autosave starts that world fresh.
 
 ## Where things live
 
@@ -109,6 +109,8 @@ The balance settings are `DEFAULT_PARAMS`:
 | `maxBreedingStress` | Max stress at which a creature can still reproduce |
 | `tempMutationScale` | How fast preferred temperature mutates |
 | `swimmerShare` | Chance that a creature is born able to swim |
+| `autoDisasters` | Whether disasters strike by themselves (the "Random disasters" switch) |
+| `autoDisasterEvery` | Average ticks between random disasters |
 | `speciationDistance` | How far traits must drift from a species' founder before a lineage splits off |
 
 Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths) are in `RULES` in the same file.
