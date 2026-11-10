@@ -8,7 +8,7 @@ import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, w
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
 import { AUTOSAVE_NAME, listSaves, getSave, getAutosave, putSave, deleteSave } from './saves.js';
-import { SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan } from './charts.js';
+import { METRICS, SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan } from './charts.js';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 12];
 const REFRESH_EVERY = 6; // frames between panel and layer refreshes
@@ -246,17 +246,6 @@ function showTab(name) {
 }
 
 // ---------- Charts and bottom bar ----------
-
-const traitMetric = (trait, label) => ({ label, floor: 0, valueOf: (s, id) => (s.counts[id] ? s.traits[id][trait] : null) });
-const METRICS = {
-  count: { fromZero: true, label: (v) => fmt(v) + ' creatures', valueOf: (s, id) => s.counts[id] ?? null },
-  speed: traitMetric('speed', (v) => v.toFixed(2)),
-  vision: traitMetric('vision', (v) => v.toFixed(0)),
-  strength: traitMetric('strength', (v) => v.toFixed(2)),
-  preferredTemp: { ...traitMetric('preferredTemp', (v) => v.toFixed(1) + '°C'), floor: -Infinity },
-  diet: traitMetric('diet', (v) => Math.round(v * 100) + '% meat'),
-  swimmers: traitMetric('swimmers', (v) => Math.round(v * 100) + '% can swim'),
-};
 
 function drawCharts() {
   const shown = shownSpecies();
@@ -879,6 +868,44 @@ $('bannerNew').onclick = () => newWorld(randomSeed());
 $('seedLoad').onclick = loadSeed;
 $('seedInput').onkeydown = (e) => { if (e.key === 'Enter') loadSeed(); };
 $('metric').onchange = drawCharts;
+
+// The pop-out charts window (templates/charts.html) reads the live data from here.
+window.lifesimCharts = {
+  read: () => ({
+    history,
+    shown: shownSpecies(),
+    living: livingSpecies(),
+    species: sim.species,
+    latestTick,
+    tick: sim.tick,
+    seed: sim.seed,
+  }),
+};
+// "Expand here" shows the same charts page over this one, for when a separate
+// window is not wanted or the browser will not open one.
+function setChartsOverlay(open) {
+  const overlay = $('chartsOverlay');
+  overlay.hidden = !open;
+  let frame = overlay.querySelector('iframe');
+  if (open && !frame) {
+    frame = document.createElement('iframe');
+    frame.src = '/charts';
+    frame.title = 'Charts';
+    overlay.append(frame);
+  } else if (!open && frame) {
+    frame.remove(); // stops it redrawing while out of sight
+  }
+}
+$('expandCharts').onclick = () => setChartsOverlay(true);
+$('closeCharts').onclick = () => setChartsOverlay(false);
+
+let chartsWindow = null;
+$('popCharts').onclick = () => {
+  // Bring the charts window forward if it is still open; otherwise open one.
+  if (!chartsWindow || chartsWindow.closed) chartsWindow = window.open('/charts', '_blank', 'popup,width=1280,height=860');
+  $('popHint').hidden = !!chartsWindow;
+  if (chartsWindow) chartsWindow.focus();
+};
 $('inspClear').onclick = () => select(null);
 $('inspFollow').onclick = () => {
   setFollowing(!following);
@@ -902,6 +929,7 @@ for (const tab of document.querySelectorAll('.tabs [role=tab]')) {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('chartsOverlay').hidden) return setChartsOverlay(false);
   if (e.target.matches('input[type=text], select')) return;
   if (e.code === 'Space') {
     e.preventDefault();

@@ -172,6 +172,20 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px;
   }
 
+  /* The charts, expanded over the page. The charts page itself goes in an iframe here. */
+  .overlay {
+    position: fixed; inset: 20px; z-index: 20; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  }
+  .overlay[hidden] { display: none; }
+  .overlaybar {
+    display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 8px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel); font-weight: 500;
+  }
+  .overlaybar button { padding: 4px 12px; font-size: 13px; }
+  .overlay iframe { flex: 1; width: 100%; border: 0; }
+  @media (max-width: 760px) { .overlay { inset: 6px; } }
+
   /* Bottom bar */
   .bar {
     grid-area: bar; background: var(--panel); border-top: 1px solid var(--border);
@@ -349,6 +363,11 @@
     </div>
 
     <div class="panel" id="tab-charts" role="tabpanel" hidden>
+      <div class="buttons" style="margin-bottom:14px">
+        <button id="popCharts">Open in a window</button>
+        <button id="expandCharts">Expand here</button>
+      </div>
+      <p class="hint" id="popHint" hidden>The browser blocked the new window. Allow pop-ups for this page and try again.</p>
       <h2>Species over time</h2>
       <select id="metric" aria-label="What to chart">
         <option value="count">Population</option>
@@ -421,6 +440,9 @@
       <span class="tip">Drag the timeline to rewind</span>
     </div>
   </footer>
+</div>
+<div class="overlay" id="chartsOverlay" hidden>
+  <div class="overlaybar"><span>Charts</span><button id="closeCharts">Close</button></div>
 </div>
 <script type="module" src="{{ url_for('static', filename='ui/main.js') }}"></script>
 </body>

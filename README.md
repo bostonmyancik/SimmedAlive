@@ -33,7 +33,7 @@ source .venv/bin/activate && python3 app.py
   - With a brush tool active, pan by dragging with the right or middle button, or with two fingers.
 - **Layers** (top of the map): terrain (fertile land, plain, desert, mountains), temperature, fertility (how readily food grows), or territory (which species dominates each area).
 - **On the map**: green dots are plants, crosses are carcasses, a blue ring means thirsty, and a bigger body means stronger. Mountains and water block movement.
-- **Sidebar tabs**: Species (every living species; click a card's header to fold it down to its name and population, or use Collapse all), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
+- **Sidebar tabs**: Species (every living species; click a card's header to fold it down to its name and population, or use Collapse all), Inspector (the selected creature, its ancestry, and a Follow button), Charts (population or any trait over time, plus the species family tree; "Open in a window" or "Expand here" shows every chart at once, large, with a readout of each species' value under the pointer), Events (the log) and Settings. On a narrow screen the sidebar is a sheet at the bottom; tap a tab to open it.
 - **Timeline** (across the bottom): each species' share of the population over the last 16,000 ticks, with marks for new species, extinctions, booms, crashes and disasters. Hover to read the tick and any event there. Drag it to rewind: the world jumps back to that moment and pauses. You can scrub back and forth, or press "Back to now". Pressing Resume, or changing the world, continues from where you are and drops what came after. Rewinding reaches back to the start of the timeline, or to when the page was last loaded if that is more recent.
 - **Bottom bar**: pause (or Space), speed, and the tick, year and season.
 - **Settings**: food supply, mutation rate, the share born able to swim, disasters (heat wave, cold snap, drought, plague, and a "Random disasters" switch that lets them and meteors strike by themselves about once a year), the world seed, and saved worlds. The running world is autosaved every five seconds and picked up again when the page loads, so a refresh or restart loses at most a few seconds. You can also save worlds under a name and load or delete them later. A loaded world carries on exactly where it left off, charts included. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared. Opening an address whose seed differs from the autosave starts that world fresh.
@@ -43,12 +43,14 @@ source .venv/bin/activate && python3 app.py
 - `app.py`: the Flask server: the page and the saved-worlds API (`/api/saves`).
 - `storage.py`: saved worlds in a SQLite file, `data/lifesim.db` by default. Set the `LIFESIM_DB` environment variable to put it elsewhere. This is the one module to replace if the app ever moves to a hosted database.
 - `templates/index.html`: page layout and styles.
+- `templates/charts.html`: the large charts view, shown in its own window or expanded over the page. It reads live data from the main page.
 - `static/ui/`: the page.
   - `main.js`: animation loop, tools, panels and bottom bar. Start reading here.
   - `camera.js`: zoom and pan.
   - `mapview.js`: draws the world and the map layers.
   - `charts.js`: the line chart, the family tree and the timeline strip.
   - `saves.js`: calls the saved-worlds API.
+  - `popout.js`: the large charts view.
 - `static/sim/`: the simulation. No page code, so it also runs under Node.
   - `params.js`: every tuning value (species traits, balance settings, fixed rules).
   - `sim.js`: world generation and the per-tick rules. Start reading here.

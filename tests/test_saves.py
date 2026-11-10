@@ -92,6 +92,11 @@ class SavesApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Life sim", response.data)
 
+    def test_charts_window_loads(self):
+        response = self.client.get("/charts")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"ui/popout.js", response.data)
+
 
 if __name__ == "__main__":
     unittest.main()
