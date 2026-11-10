@@ -908,3 +908,25 @@ test('an existing map can be kept and repopulated', () => {
   assert.equal(sim.creatures.length, 0);
   assert.equal(sim.populate(), true);
 });
+
+test('a base in good repair raises newcomers every so often; a badly damaged one does not', () => {
+  const raised = (health) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    base(sim, spot, { health, hitTick: 0 }); // just hit, so it is not being repaired
+    sim.creatures.push(creature({ x: spot.x, y: spot.y, speed: 0.01, vision: 44 }));
+    sim.tick = RULES.baseSpawnEvery - 1;
+    sim.bases[0].hitTick = sim.tick;
+    sim.step(0, 0);
+    return sim;
+  };
+  const healthy = raised(RULES.baseHealth[0]);
+  assert.equal(healthy.creatures.length, 2);
+  const newcomer = healthy.creatures[1];
+  assert.deepEqual([newcomer.species, newcomer.x, newcomer.y, newcomer.vision], [1, healthy.bases[0].x, healthy.bases[0].y, 44]);
+  assert.equal(healthy.species[1].count, 2);
+  healthy.step(0, 0);
+  assert.equal(healthy.creatures.length, 2); // not again until the next interval
+
+  assert.equal(raised(RULES.baseHealth[0] * 0.3).creatures.length, 1);
+});

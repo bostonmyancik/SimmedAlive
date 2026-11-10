@@ -89,6 +89,7 @@ python3 -m unittest discover tests
   - *Shelter.* Members standing at their base, up to as many as it holds, are spared 10 degrees of cold and take half damage. In the cold, members head for a base that has room and stay there.
   - *Storing food.* A well-fed member near a base carries the food it finds home instead of eating it, until the store is full. Hungry members eat from the store. A species that hoards grows more slowly at first but has a reserve for droughts and winters.
   - *Farming.* A fort or castle may take up farming (on average after about half a year); plants then sprout in the fields around it.
+  - *Newcomers.* Every 2,500 ticks a base whose walls are at half strength or better raises new members of its species there: one at a camp, rising to three at a castle. Each takes after a living member picked at random. A damaged base raises none until it is repaired.
   - *Attack and defence.* Hungry creatures that see an enemy base with food in it go for it, and any creature at the middle of an enemy base tears at its walls. Members charge any enemy that comes up to their base. A base that falls spills its store on the ground for anyone to eat. Walls are repaired when left alone for a while.
   - *Loss.* A base is also lost if nobody shelters there for 3,000 ticks, if its species dies out, if a meteor hits it, or if water or mountains are painted over it.
 - **Events.** The sim logs bases built, grown, farmed and lost, new species, extinctions, booms and crashes (a population doubling or halving between checks), and every disaster.
