@@ -39,17 +39,34 @@ export function windowSpan(tick) {
   return Math.min(WINDOW_TICKS, Math.max(MIN_SPAN, tick));
 }
 
+const whole = (n) => Math.round(n).toLocaleString('en-US');
+const traitMetric = (trait, title, label) =>
+  ({ title, label, floor: 0, valueOf: (s, id) => (s.counts[id] ? s.traits[id][trait] : null) });
+
+// Everything that can be charted per species. Each entry has a title and the
+// options drawLineChart needs.
+export const METRICS = {
+  count: { title: 'Population', fromZero: true, label: (v) => whole(v) + ' creatures', valueOf: (s, id) => s.counts[id] ?? null },
+  speed: traitMetric('speed', 'Average speed', (v) => v.toFixed(2)),
+  vision: traitMetric('vision', 'Average vision', (v) => v.toFixed(0)),
+  strength: traitMetric('strength', 'Average strength', (v) => v.toFixed(2)),
+  preferredTemp: { ...traitMetric('preferredTemp', 'Average preferred temperature', (v) => v.toFixed(1) + '°C'), floor: -Infinity },
+  diet: traitMetric('diet', 'Share of meat in diet', (v) => Math.round(v * 100) + '% meat'),
+  swimmers: traitMetric('swimmers', 'Share that can swim', (v) => Math.round(v * 100) + '% can swim'),
+};
+
 // One line per species.
 //   valueOf(sample, id): the number to plot, or null where the species has none
 //   fromZero: start the y axis at zero (for head counts) instead of fitting the data
 //   floor: the y axis never goes below this
-//   label(value): text for the axis ends
-export function drawLineChart(canvas, history, species, tick, { valueOf, fromZero, floor = -Infinity, label }) {
+//   label(value): text for a value on the y axis
+//   detailed: draw grid lines with their values, and tick numbers along the bottom
+export function drawLineChart(canvas, history, species, tick, { valueOf, fromZero, floor = -Infinity, label }, detailed = false) {
   const p = prepare(canvas);
   if (!p) return;
   const { ctx, w, h } = p;
   const start = windowStart(tick), span = windowSpan(tick);
-  const plotTop = 16, plotBottom = h - 16;
+  const plotTop = 16, plotBottom = h - (detailed ? 18 : 16);
 
   let lo = Infinity, hi = -Infinity;
   for (const sample of history) {
@@ -69,19 +86,37 @@ export function drawLineChart(canvas, history, species, tick, { valueOf, fromZer
 
   ctx.strokeStyle = css('--border');
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, plotBottom + 0.5);
-  ctx.lineTo(w, plotBottom + 0.5);
-  ctx.stroke();
   ctx.fillStyle = css('--text-muted');
   ctx.font = '11px system-ui, sans-serif';
-  ctx.fillText(label(hi), 2, 11);
-  ctx.fillText(label(lo), 2, h - 3);
+  if (detailed) {
+    // Five grid lines, each labelled with its value, and tick numbers below.
+    for (let i = 0; i <= 4; i++) {
+      const y = Math.round(plotBottom - i / 4 * (plotBottom - plotTop)) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+      ctx.fillText(label(lo + (hi - lo) * i / 4), 2, y - 3);
+    }
+    const step = axisStep(span);
+    for (let t = Math.ceil(start / step) * step; t <= start + span; t += step) {
+      const text = t.toLocaleString('en-US'), width = ctx.measureText(text).width;
+      const x = (t - start) / span * w;
+      ctx.fillText(text, Math.min(w - width - 1, Math.max(1, x - width / 2)), h - 4);
+    }
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(0, plotBottom + 0.5);
+    ctx.lineTo(w, plotBottom + 0.5);
+    ctx.stroke();
+    ctx.fillText(label(hi), 2, 11);
+    ctx.fillText(label(lo), 2, h - 3);
+  }
 
   for (const sp of species) {
     ctx.beginPath();
     ctx.strokeStyle = sp.color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = detailed ? 2 : 1.5;
     let drawing = false;
     for (const sample of history) {
       const v = valueOf(sample, sp.id);

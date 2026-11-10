@@ -39,6 +39,11 @@ def create_app(db_path=None):
     def index():
         return render_template("index.html")
 
+    @app.route("/charts")
+    def charts():
+        """The pop-out charts window. It reads its data from the page that opened it."""
+        return render_template("charts.html")
+
     @app.get("/api/saves")
     def list_saves():
         return jsonify(store.list())
