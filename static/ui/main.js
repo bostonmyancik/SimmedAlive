@@ -58,7 +58,6 @@ let latestTick = 0;        // the newest tick this run has reached ("now")
 let scrubbing = false;     // the timeline is being dragged
 const inPast = () => sim.tick < latestTick;
 let selected = null;       // the creature shown in the Inspector
-let selectedBase = null;   // or the base shown there
 let selectedDiedAt = null; // tick at which it died, if it has
 let following = false;     // keep the camera on the selected creature
 let history = [];          // samples: { tick, counts, traits }
@@ -160,7 +159,6 @@ function refreshSpecies() {
       '<dt>Vision</dt><dd>' + Math.round(st.vision) + '</dd>' +
       '<dt>Prefers</dt><dd>' + Math.round(st.preferredTemp) + '°C</dd>' +
       '<dt>Kills</dt><dd>' + fmt(sp.kills) + '</dd>' +
-      '<dt>Bases</dt><dd>' + basesSummary(sp) + '</dd>' +
       '<dt>Latest generation</dt><dd>' + st.maxGeneration + '</dd>';
     // Keep the cards sorted by population, moving one only when its place changed.
     if (container.children[position] !== card.root) container.insertBefore(card.root, container.children[position] || null);
@@ -172,42 +170,13 @@ function refreshSpecies() {
     : '';
 }
 
-// "2 of 3 · 41 food stored", or how many members the species needs for its first.
-function basesSummary(sp) {
-  const held = sim.bases.filter((base) => base.species === sp.id);
-  if (!held.length) return 'None (needs ' + fmt(sim.params.basePopulation) + ' members)';
-  const stored = held.reduce((sum, base) => sum + base.plants + base.meat, 0);
-  return held.length + ' of ' + sim.params.maxBases + ' · ' + fmt(stored) + ' food stored';
-}
-
-function refreshBaseInspector() {
-  if (selectedBase && !sim.bases.includes(selectedBase)) selectedBase = null; // destroyed or abandoned
-  $('baseBody').hidden = !selectedBase;
-  if (!selectedBase) return;
-  const base = selectedBase, info = sim.baseInfo(base), sp = sim.species[base.species];
-  const stored = base.plants + base.meat;
-  $('baseTitle').innerHTML = dot(sp.color) + sp.name + ' ' + info.stage;
-  $('baseStatus').textContent = info.underAttack ? 'Under attack' : base.farming ? 'Farming the land around it' : 'Standing';
-  setMeter('baseHealth', fmt(base.health) + ' of ' + fmt(info.maxHealth), base.health / info.maxHealth);
-  setMeter('baseStore', fmt(stored) + ' of ' + fmt(info.store) + ' meals', stored / info.store);
-  setMeter('baseShelter', base.occupants + ' of ' + info.shelter + ' creatures', base.occupants / info.shelter);
-  setMeter('baseGrowth', info.growth >= 1 ? 'Fully grown' : Math.round(info.growth * 100) + '% of the way to a castle', info.growth);
-  $('baseBuilt').textContent = 'Tick ' + fmt(base.builtTick);
-  $('basePlants').textContent = fmt(base.plants);
-  $('baseMeat').textContent = fmt(base.meat);
-  $('baseNewcomers').textContent = !info.canSpawn ? 'None until the walls are above half strength'
-    : info.spawnIn ? 'In ' + fmt(info.spawnIn) + ' ticks' : 'Any moment';
-  $('baseFarming').textContent = base.farming ? 'Yes' : info.stage === 'camp' ? 'Not yet (camps cannot)' : 'Not yet';
-}
-
 function setMeter(id, text, fraction) {
   $(id).textContent = text;
   $(id + 'Bar').style.width = Math.max(0, Math.min(1, fraction)) * 100 + '%';
 }
 
 function refreshInspector() {
-  refreshBaseInspector();
-  $('inspEmpty').hidden = !!selected || !!selectedBase;
+  $('inspEmpty').hidden = !!selected;
   $('inspBody').hidden = !selected;
   if (!selected) return;
   const c = selected;
@@ -222,8 +191,8 @@ function refreshInspector() {
   const stressed = Math.abs(gap) > sim.params.tempTolerance;
   let status;
   if (selectedDiedAt !== null) status = 'Died at tick ' + fmt(selectedDiedAt);
-  else status = [c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null,
-    c.sheltered ? 'Sheltering in its base' : null].filter(Boolean).join(' · ') || 'Comfortable';
+  else status = [c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
+    .filter(Boolean).join(' · ') || 'Comfortable';
 
   $('inspTitle').innerHTML = dot(sp.color) + sp.name;
   $('inspStatus').textContent = status;
@@ -236,7 +205,6 @@ function refreshInspector() {
   $('inspStrength').textContent = c.strength.toFixed(2);
   $('inspDiet').textContent = dietWords(c.diet);
   $('inspSwims').textContent = c.swimmer ? 'Yes' : 'No';
-  $('inspCarrying').textContent = c.carrying === 2 ? 'Meat, for the store' : c.carrying ? 'A plant, for the store' : 'Nothing';
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
   $('inspBorn').textContent = c.bornTick ? 'Tick ' + fmt(c.bornTick) : 'At the start';
@@ -253,18 +221,12 @@ function setFollowing(on) {
   $('inspFollow').textContent = on ? 'Following' : 'Follow';
 }
 
-// Shows a creature or a base in the Inspector, or neither.
-function select(creature, base = null) {
+function select(creature) {
   selected = creature;
-  selectedBase = base;
   selectedDiedAt = null;
   setFollowing(false);
   refreshInspector();
-  if (creature || base) showTab('inspector');
-}
-
-function baseNear(at, reach) {
-  return sim.bases.find((base) => Math.hypot(wrapDistance(base.x - at.x, WIDTH), base.y - at.y) < reach) || null;
+  if (creature) showTab('inspector');
 }
 
 function refreshEvents() {
@@ -654,7 +616,7 @@ function frame() {
       glide ? alive.prevY + (alive.y - alive.prevY) * interp : alive.y,
     );
   }
-  map.draw(interp, alive || selectedBase, brushOutline());
+  map.draw(interp, alive, brushOutline());
   requestAnimationFrame(frame);
 }
 
@@ -708,10 +670,7 @@ function clickMap(sx, sy) {
     map.paintLayer();
     refreshAll();
   } else if (tool === 'select') {
-    // The building itself picks the base; anywhere else, a creature comes first.
-    const base = baseNear(at, 9);
-    const creature = base ? null : creatureNear(at);
-    select(creature, base || (creature ? null : baseNear(at, RULES.baseRadius)));
+    select(creatureNear(at));
   }
 }
 
@@ -1077,7 +1036,6 @@ $('popCharts').onclick = () => {
   if (chartsWindow) chartsWindow.focus();
 };
 $('inspClear').onclick = () => select(null);
-$('baseClear').onclick = () => select(null);
 $('inspFollow').onclick = () => {
   setFollowing(!following);
   // Zoom in enough to make following worthwhile.

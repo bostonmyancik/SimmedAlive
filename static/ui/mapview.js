@@ -148,81 +148,6 @@ export function createMapView(canvas, sim, camera) {
     else if (view.layer === 'territory') paintTerritory();
   }
 
-  // Traces a wall from x0 to x1 with `teeth` battlements along the top.
-  function battlements(x0, x1, top, bottom, teeth) {
-    const step = (x1 - x0) / (teeth * 2 - 1), notch = Math.min(step, (bottom - top) * 0.35);
-    ctx.moveTo(x0, bottom);
-    for (let i = 0; i < teeth * 2 - 1; i++) {
-      const y = i % 2 ? top + notch : top;
-      ctx.lineTo(x0 + i * step, y);
-      ctx.lineTo(x0 + (i + 1) * step, y);
-    }
-    ctx.lineTo(x1, bottom);
-    ctx.closePath();
-  }
-
-  // A base: the ground it shelters, its fields if it farms, the building (a
-  // tent, then a walled fort, then a castle with a keep), and bars for its
-  // food store and, when damaged, its walls.
-  function drawBase(base, isSelected, outline) {
-    const info = sim.baseInfo(base), color = sim.species[base.species].color;
-    const { x, y } = base, s = 9 + 4 * info.growth;
-
-    ctx.beginPath();
-    ctx.arc(x, y, RULES.baseRadius, 0, 6.29);
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.13;
-    ctx.fill();
-    ctx.globalAlpha = info.underAttack ? 0.9 : 0.55;
-    ctx.strokeStyle = info.underAttack ? '#e24b4a' : color;
-    ctx.lineWidth = info.underAttack ? 1.6 : 1;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    if (base.farming) {
-      ctx.beginPath();
-      ctx.arc(x, y, RULES.farmRadius, 0, 6.29);
-      ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = '#639922';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    ctx.fillStyle = color;
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 1;
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    if (info.stage === 'camp') {
-      ctx.moveTo(x - s, y + s * 0.7);
-      ctx.lineTo(x, y - s * 0.8);
-      ctx.lineTo(x + s, y + s * 0.7);
-      ctx.closePath();
-    } else {
-      battlements(x - s, x + s, y - s * 0.3, y + s * 0.7, 3);
-      if (info.stage === 'castle') battlements(x - s * 0.45, x + s * 0.45, y - s * 1.2, y - s * 0.05, 2);
-    }
-    ctx.fill();
-    ctx.stroke();
-
-    const bar = (top, fraction, fill) => {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-      ctx.fillRect(x - s, top, s * 2, 2);
-      ctx.fillStyle = fill;
-      ctx.fillRect(x - s, top, s * 2 * Math.max(0, Math.min(1, fraction)), 2);
-    };
-    bar(y + s * 0.7 + 2.5, (base.plants + base.meat) / info.store, '#8fc93a');
-    if (base.health < info.maxHealth * 0.97) bar(y + s * 0.7 + 5.5, base.health / info.maxHealth, '#e24b4a');
-
-    if (isSelected) {
-      ctx.beginPath();
-      ctx.arc(x, y, RULES.baseRadius + 4, 0, 6.29);
-      ctx.strokeStyle = outline;
-      ctx.lineWidth = 2 / Math.max(1, camera.zoom);
-      ctx.stroke();
-    }
-  }
-
   // Draws one copy of the world. `minX` and `maxX` are the visible world x range.
   function drawWorld(minX, maxX, interp, selected) {
     ctx.drawImage(land.canvas, 0, 0, WIDTH, HEIGHT);
@@ -253,12 +178,6 @@ export function createMapView(canvas, sim, camera) {
     }
     ctx.stroke();
 
-    const outline = css('--text');
-    for (const base of sim.bases) {
-      const reach = RULES.farmRadius + 4;
-      if (base.x >= minX - reach && base.x <= maxX + reach) drawBase(base, base === selected, outline);
-    }
-
     for (const c of sim.creatures) {
       let x = c.x, y = c.y;
       // At slow speeds, glide between ticks (but not across the wrap seam).
@@ -278,16 +197,6 @@ export function createMapView(canvas, sim, camera) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-      if (c.carrying) {
-        // What it is carrying home rides on its back.
-        ctx.beginPath();
-        ctx.arc(x - Math.cos(c.heading) * (r + 1.5), y - Math.sin(c.heading) * (r + 1.5), 2, 0, 6.29);
-        ctx.fillStyle = c.carrying === 2 ? css('--carcass') : '#639922';
-        ctx.fill();
-        ctx.strokeStyle = outline;
-        ctx.lineWidth = 0.6;
-        ctx.stroke();
-      }
       if (c.thirsty) {
         ctx.beginPath();
         ctx.arc(x, y, r + 2, 0, 6.29);
