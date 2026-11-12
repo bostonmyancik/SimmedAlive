@@ -134,8 +134,8 @@
   .meter .row { display: flex; justify-content: space-between; color: var(--text-secondary); }
   .meter .track { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 3px; }
   .meter .track i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-  #inspTitle, #baseTitle { font-size: 17px; font-weight: 500; display: flex; align-items: center; margin-bottom: 2px; }
-  #inspStatus, #baseStatus { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; }
+  #inspTitle { font-size: 17px; font-weight: 500; display: flex; align-items: center; margin-bottom: 2px; }
+  #inspStatus { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; }
   #hist { display: block; width: 100%; height: 200px; }
   #tree { display: block; width: 100%; height: 30px; }
   select {
@@ -162,8 +162,6 @@
   #events .crash .pip, #events .drought .pip { background: #d08a1c; }
   #events .plague .pip { background: #8e5bbf; }
   #events .meteor .pip { background: #e24b4a; }
-  #events .base .pip { background: #2f9e8f; }
-  #events .razed .pip { background: #b0492f; }
   button[aria-pressed=true]#inspFollow { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent); }
   .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
 
@@ -244,8 +242,6 @@
   .marker.crash::before, .marker.drought::before { background: #d08a1c; }
   .marker.plague::before { background: #8e5bbf; }
   .marker.meteor::before { background: #e24b4a; }
-  .marker.base::before { background: #2f9e8f; }
-  .marker.razed::before { background: #b0492f; }
 
   /* Narrow screens: the sidebar becomes a sheet over the bottom of the map. */
   @media (max-width: 760px) {
@@ -280,7 +276,7 @@
 <body>
 <div class="app">
   <nav class="rail" aria-label="Tools">
-    <button class="tool" data-tool="select" aria-pressed="true" title="Select a creature or a base (1)">
+    <button class="tool" data-tool="select" aria-pressed="true" title="Select a creature (1)">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M5 3l10 7-4.5 1L13 16l-2 1-2.5-5L5 15z"/></svg>
       Select
     </button>
@@ -355,28 +351,11 @@
       <div class="cardsbar"><span id="speciesSummary"></span><button id="collapseAll">Collapse all</button></div>
       <div id="cards"></div>
       <p class="hint">Bigger body means stronger. A blue ring means thirsty. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
-      <p class="hint">A species with enough members builds a camp, which grows into a fort and then a castle if it lasts a year. Members shelter there from cold and attack, carry food back to its store (a dot on their back), and may take up farming (the dashed green ring). Click a base to inspect it.</p>
       <p class="hint" id="extinctList"></p>
     </div>
 
     <div class="panel" id="tab-inspector" role="tabpanel" hidden>
-      <p class="hint" id="inspEmpty">Choose the Select tool and click a creature or a base on the map to inspect it.</p>
-      <div id="baseBody" hidden>
-        <div id="baseTitle"></div>
-        <div id="baseStatus"></div>
-        <div class="meter"><div class="row"><span>Walls</span><span id="baseHealth"></span></div><div class="track"><i id="baseHealthBar"></i></div></div>
-        <div class="meter"><div class="row"><span>Food store</span><span id="baseStore"></span></div><div class="track"><i id="baseStoreBar"></i></div></div>
-        <div class="meter"><div class="row"><span>Sheltering</span><span id="baseShelter"></span></div><div class="track"><i id="baseShelterBar"></i></div></div>
-        <div class="meter"><div class="row"><span>Growth</span><span id="baseGrowth"></span></div><div class="track"><i id="baseGrowthBar"></i></div></div>
-        <dl class="facts">
-          <dt>Built</dt><dd id="baseBuilt"></dd>
-          <dt>Plants stored</dt><dd id="basePlants"></dd>
-          <dt>Meat stored</dt><dd id="baseMeat"></dd>
-          <dt>Farming</dt><dd id="baseFarming"></dd>
-          <dt>Next newcomers</dt><dd id="baseNewcomers"></dd>
-        </dl>
-        <div class="buttons" style="margin-top:16px"><button id="baseClear">Clear selection</button></div>
-      </div>
+      <p class="hint" id="inspEmpty">Choose the Select tool and click a creature on the map to inspect it.</p>
       <div id="inspBody" hidden>
         <div id="inspTitle"></div>
         <div id="inspStatus"></div>
@@ -391,7 +370,6 @@
           <dt>Strength</dt><dd id="inspStrength"></dd>
           <dt>Diet</dt><dd id="inspDiet"></dd>
           <dt>Can swim</dt><dd id="inspSwims"></dd>
-          <dt>Carrying</dt><dd id="inspCarrying"></dd>
           <dt>Prefers</dt><dd id="inspPrefers"></dd>
           <dt>Temperature here</dt><dd id="inspHere"></dd>
           <dt>Born</dt><dd id="inspBorn"></dd>
