@@ -29,6 +29,10 @@ export function spawnCreature(id, species, traits, x, y, swimmerShare, random) {
     detour: 0,  // ticks left of holding course around an obstacle
     blocked: 0, // how many detours in a row it has needed
     slide: null, // the compass heading it is following round the obstacle, if any
+    ability: null, // one of ABILITIES (see abilities.js), or null
+    cooldown: 0,   // ticks before it can use its ability again
+    frozen: 0,     // ticks left unable to move or fight (frozen, or held after a pull)
+    dashing: 0,    // ticks left of a dash
   };
 }
 
@@ -62,5 +66,9 @@ export function makeOffspring(id, parent, tick, mutationRate, params, random) {
     detour: 0,
     blocked: 0,
     slide: null,
+    ability: null, // the sim decides whether it inherits its parent's
+    cooldown: 0,
+    frozen: 0,
+    dashing: 0,
   };
 }

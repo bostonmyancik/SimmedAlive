@@ -7,6 +7,7 @@ import { SpatialGrid } from './grid.js';
 import { spawnCreature, makeOffspring } from './creatures.js';
 import { TRAITS, traitDistance, traitsOf, nameSpecies, colorForSpecies, normalizeFounders } from './species.js';
 import { pack, unpack } from './pack.js';
+import { ABILITIES, ABILITY_NAMES, inheritAbility, abilityPower } from './abilities.js';
 import {
   GRID_W, GRID_H, CELL, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN,
   cellIndex, wrapDistance, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
@@ -33,7 +34,26 @@ const SAVE_VERSION = 1;
 const CREATURE_FIELDS = [
   'id', 'parentId', 'species', 'x', 'y', 'heading', 'energy', 'hydration', 'thirsty', 'age',
   'bornTick', 'generation', 'offspring', ...TRAITS, 'swimmer', 'detour', 'blocked', 'slide',
+  'ability', 'cooldown', 'frozen', 'dashing',
 ];
+
+// How the event log describes a species changing, trait by trait: [more, less].
+const CHANGE_WORDS = {
+  speed: ['faster', 'slower'],
+  vision: ['sharper-eyed', 'shorter-sighted'],
+  strength: ['stronger', 'weaker'],
+  preferredTemp: ['suited to warmer weather', 'suited to colder weather'],
+  diet: ['more meat-eating', 'more plant-eating'],
+};
+
+// How the event log names an ability a species has taken up.
+const ABILITY_PHRASES = {
+  camouflage: 'camouflage',
+  dash: 'a burst of speed',
+  spit: 'spitting',
+  freeze: 'the power to freeze',
+  pull: 'a grabbing tongue',
+};
 
 // Turns (in radians) a blocked creature tries, gentlest first, to slide past an obstacle.
 const SLIDE_TURNS = [0.35, 0.7, 1.05, 1.4, 1.75, 2.1, 2.45, 2.8];
@@ -52,7 +72,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
     seed,
     params: P,
     // Every species that has ever existed; a creature's `species` indexes this.
-    // { id, name, color, parent, bornTick, extinctTick, established, count, kills, origin }
+    // { id, name, color, parent, bornTick, extinctTick, established, count, kills,
+    //   origin, stage, stageOrigin, abilities }
+    // `origin` is the species' typical traits, which shift as it evolves;
+    // `stage` counts how many times it has changed enough to be called a new
+    // stage, and `stageOrigin` is where it stood at the start of this one.
+    // `abilities` lists the abilities most of its members have.
     species: [],
     // The species a new world starts with. Change them with setFounders().
     founders: normalizeFounders(SPECIES, SPECIES[0]),
@@ -66,6 +91,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     food: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE),     // plants: { x, y, wet }
     carcasses: new SpatialGrid(WIDTH, HEIGHT, BUCKET_SIZE), // meat: { x, y, tick, wet }
     creatures: [],
+    projectiles: [],     // spit in flight: { x, y, vx, vy, species, damage, ticks }
+    effects: [],         // recent ability flashes, for drawing only: { kind, tick, x, y, ... }
     fronts: [],
     events: [],          // the event log: { tick, kind, species, text }
     tick: 0,
@@ -134,6 +161,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.carcasses.clear();
     carcassQueue = [];
     sim.creatures = [];
+    sim.projectiles = [];
+    sim.effects = [];
     sim.events = [];
     sim.tick = 0;
     sim.temperatureBoost = 0;
@@ -186,6 +215,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
       count: 0,
       kills: 0,
       origin: traitsOf(founder),
+      stage: 1,
+      stageOrigin: traitsOf(founder),
+      abilities: [],
       lastTrendCount: founder.startCount,
     }));
 
@@ -419,11 +451,24 @@ export function createSim({ seed = 1, params = {} } = {}) {
       temperature: pack(sim.temperature),
       tempOffset: pack(sim.tempOffset),
       fronts: sim.fronts.map((f) => ({ ...f })),
-      species: sim.species.map((sp) => ({ ...sp, origin: { ...sp.origin } })),
+      species: sim.species.map(copySpecies),
       creatures: sim.creatures.map((c) => CREATURE_FIELDS.map((field) => c[field])),
+      projectiles: sim.projectiles.map((p) => ({ ...p })),
       food: [...sim.food].map((f) => [f.x, f.y]),
       carcasses: [...sim.carcasses].map((k) => [k.x, k.y, k.tick]),
       events: sim.events.map((e) => ({ ...e })),
+    };
+  }
+
+  // A deep copy of a species record. Saves from before species evolved lack
+  // the stage and abilities, so they start at stage 1 with none.
+  function copySpecies(sp) {
+    return {
+      ...sp,
+      origin: { ...sp.origin },
+      stage: sp.stage || 1,
+      stageOrigin: { ...(sp.stageOrigin || sp.origin) },
+      abilities: [...(sp.abilities || [])],
     };
   }
 
@@ -446,7 +491,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.temperatureBoost = data.temperatureBoost;
     sim.droughtUntil = data.droughtUntil;
     sim.fronts = data.fronts.map((f) => ({ ...f }));
-    sim.species = data.species.map((sp) => ({ ...sp, origin: { ...sp.origin } }));
+    sim.species = data.species.map(copySpecies);
     livingSpecies = sim.species.filter((sp) => sp.count > 0).length;
     sim.events = data.events.map((e) => ({ ...e }));
     sim.creatures = data.creatures.map((values) => {
@@ -456,8 +501,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.detour = c.detour || 0;
       c.blocked = c.blocked || 0;
       c.slide = c.slide ?? null;
+      c.ability = c.ability ?? null; // saves from before abilities existed
+      c.cooldown = c.cooldown || 0;
+      c.frozen = c.frozen || 0;
+      c.dashing = c.dashing || 0;
       return c;
     });
+    sim.projectiles = (data.projectiles || []).map((p) => ({ ...p }));
+    sim.effects = [];
 
     sim.food.clear();
     const wet = (x, y) => sim.water[cellIndex(x, y)] === 1;
@@ -520,6 +571,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
       count: 1, // the newborn itself, so siblings born this tick can join
       kills: 0,
       origin,
+      stage: 1,
+      stageOrigin: { ...origin },
+      // An ability its parent species already had comes with it.
+      abilities: child.ability && home.abilities.includes(child.ability) ? [child.ability] : [],
       lastTrendCount: 0,
     });
     livingSpecies++;
@@ -557,6 +612,151 @@ export function createSim({ seed = 1, params = {} } = {}) {
         sp.lastTrendCount = now;
       }
     }
+  }
+
+  // ---------- Evolution ----------
+
+  // Each established species shifts part of the way toward the average of its
+  // members, so the whole species changes as they do instead of only ever
+  // splitting. Once it has changed far enough from where its current stage
+  // began, it reaches a new stage, which also makes abilities likelier.
+  function evolveSpecies() {
+    const sums = sim.species.map(() => null);
+    for (const c of sim.creatures) {
+      let sum = sums[c.species];
+      if (!sum) {
+        sum = sums[c.species] = { n: 0 };
+        for (const trait of TRAITS) sum[trait] = 0;
+      }
+      sum.n++;
+      for (const trait of TRAITS) sum[trait] += c[trait];
+    }
+    for (const sp of sim.species) {
+      const sum = sums[sp.id];
+      if (!sum || !sp.established || sum.n < RULES.establishedAt) continue;
+      for (const trait of TRAITS) sp.origin[trait] += (sum[trait] / sum.n - sp.origin[trait]) * P.evolveRate;
+      if (traitDistance(sp.origin, sp.stageOrigin) < P.evolveStep) continue;
+      sp.stage++;
+      logEvent('evolve', sp.name + ' evolved to stage ' + sp.stage + ': ' + describeChange(sp.stageOrigin, sp.origin), sp.id);
+      sp.stageOrigin = { ...sp.origin };
+    }
+  }
+
+  // The biggest changes between two sets of traits, in words.
+  function describeChange(before, after) {
+    const changes = TRAITS
+      .map((trait) => ({ trait, by: (after[trait] - before[trait]) / RULES.traitScales[trait] }))
+      .filter((change) => Math.abs(change.by) >= 0.2)
+      .sort((a, b) => Math.abs(b.by) - Math.abs(a.by))
+      .slice(0, 3)
+      .map(({ trait, by }) => CHANGE_WORDS[trait][by > 0 ? 0 : 1]);
+    if (changes.length < 2) return changes[0] || 'changed a little in many ways';
+    return changes.slice(0, -1).join(', ') + ' and ' + changes[changes.length - 1];
+  }
+
+  // Notes when an ability has spread through most of a species, or died out of it.
+  function reviewAbilities() {
+    const held = sim.species.map(() => ({}));
+    for (const c of sim.creatures) if (c.ability) held[c.species][c.ability] = (held[c.species][c.ability] || 0) + 1;
+    for (const sp of sim.species) {
+      if (!sp.established || sp.count < RULES.establishedAt) continue;
+      for (const name of ABILITIES) {
+        const share = (held[sp.id][name] || 0) / sp.count;
+        const has = sp.abilities.includes(name);
+        if (!has && share >= RULES.abilitySpreadAt) {
+          sp.abilities.push(name);
+          logEvent('ability', sp.name + ' evolved ' + ABILITY_PHRASES[name], sp.id);
+        } else if (has && share < RULES.abilityFadeAt) {
+          sp.abilities.splice(sp.abilities.indexOf(name), 1);
+          logEvent('ability', sp.name + ' lost ' + ABILITY_PHRASES[name], sp.id);
+        }
+      }
+    }
+  }
+
+  // ---------- Abilities in use ----------
+
+  // Whether creature `o` is hidden from a viewer `distSq` away from it.
+  const hiddenFrom = (o, distSq) => P.abilities && o.ability === 'camouflage'
+    && distSq > RULES.abilities.camouflage.seenWithin * RULES.abilities.camouflage.seenWithin;
+
+  // Uses the creature's ability on `enemy` (the nearest one it can see) when
+  // it is ready and the moment suits it. `fleeing` is true when it is running away.
+  function useAbility(c, enemy, enemyDistSq, fleeing) {
+    if (!P.abilities || !c.ability || c.cooldown > 0 || !enemy) return;
+    const rule = RULES.abilities[c.ability];
+    if (!rule.cost || c.energy < rule.cost + 10) return;
+    const power = abilityPower(c.ability, c.strength);
+    const outOfReach = enemyDistSq >= RULES.attackRangeSq;
+    let used = false;
+
+    if (c.ability === 'dash') {
+      if (fleeing) {
+        c.dashing = power.ticks;
+        used = true;
+      }
+    } else if (c.ability === 'spit') {
+      if (outOfReach && enemyDistSq <= power.range * power.range) {
+        const angle = Math.atan2(enemy.y - c.y, enemy.x - c.x);
+        sim.projectiles.push({
+          x: c.x, y: c.y,
+          vx: Math.cos(angle) * rule.speedPx, vy: Math.sin(angle) * rule.speedPx,
+          species: c.species, damage: power.damage,
+          ticks: Math.ceil(power.range / rule.speedPx) + 2,
+        });
+        used = true;
+      }
+    } else if (c.ability === 'freeze') {
+      if (enemyDistSq <= power.radius * power.radius) {
+        creatureGrid.forEachNear(c.x, c.y, power.radius, (o) => {
+          if (o.energy > 0 && isHostile(c.species, o.species)) o.frozen = Math.max(o.frozen || 0, power.ticks);
+        });
+        sim.effects.push({ kind: 'freeze', tick: sim.tick, x: c.x, y: c.y, radius: power.radius });
+        used = true;
+      }
+    } else if (c.ability === 'pull') {
+      if (!fleeing && outOfReach && enemyDistSq <= power.range * power.range && enemy.strength < c.strength) {
+        // Drag the enemy to just in front of the puller, unless a mountain is in the way there.
+        const distance = Math.sqrt(enemyDistSq);
+        const x = (c.x + (enemy.x - c.x) / distance * 5 + WIDTH) % WIDTH;
+        const y = clamp(c.y + (enemy.y - c.y) / distance * 5, 0, HEIGHT - 1);
+        if (sim.terrain[cellIndex(x, y)] !== MOUNTAIN) {
+          sim.effects.push({ kind: 'pull', tick: sim.tick, x: c.x, y: c.y, fromX: enemy.x, fromY: enemy.y });
+          const oldX = enemy.x, oldY = enemy.y;
+          enemy.x = x;
+          enemy.y = y;
+          creatureGrid.move(enemy, oldX, oldY);
+          enemy.frozen = Math.max(enemy.frozen || 0, power.hold);
+          used = true;
+        }
+      }
+    }
+    if (used) {
+      c.cooldown = rule.cooldown;
+      c.energy -= rule.cost;
+    }
+  }
+
+  // Spit flies straight on and hits the first enemy of its species it reaches.
+  function moveProjectiles() {
+    const flying = [];
+    for (const p of sim.projectiles) {
+      let hit = null;
+      for (let half = 0; half < 2 && !hit; half++) {
+        p.x = (p.x + p.vx / 2 + WIDTH) % WIDTH;
+        p.y += p.vy / 2;
+        hit = creatureGrid.nearest(p.x, p.y, 16, (o) => o.energy > 0 && isHostile(p.species, o.species));
+      }
+      p.ticks--;
+      if (hit) {
+        hit.energy -= p.damage;
+        if (hit.energy <= 0) sim.species[p.species].kills++;
+        sim.effects.push({ kind: 'hit', tick: sim.tick, x: p.x, y: p.y });
+      } else if (p.ticks > 0 && p.y >= 0 && p.y < HEIGHT) {
+        flying.push(p);
+      }
+    }
+    sim.projectiles = flying;
   }
 
   // ---------- A creature's turn ----------
@@ -636,16 +836,37 @@ export function createSim({ seed = 1, params = {} } = {}) {
     return true;
   }
 
+  // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost
+  // energy, and so does having an ability. Water runs low faster in the heat.
+  function payUpkeep(c, stress, swimming, temp) {
+    c.energy -= 0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
+      + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress
+      + (swimming ? RULES.swimCost : 0) + (c.ability ? RULES.abilityUpkeep : 0);
+    c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12)
+      * (inDrought() ? RULES.droughtThirstFactor : 1);
+    c.age++;
+  }
+
   // Fight, decide where to go, move, pay upkeep, breed.
   function act(c, born, mutationRate) {
     const cell = cellIndex(c.x, c.y);
     const temp = sim.temperature[cell];
     const stress = Math.max(0, Math.abs(temp - c.preferredTemp) - P.tempTolerance);
+    const swimming = sim.water[cell] === 1;
+    if (c.cooldown > 0) c.cooldown--;
+
+    // Frozen (or held after a pull): it can do nothing but wait it out.
+    if (c.frozen > 0) {
+      c.frozen--;
+      payUpkeep(c, stress, swimming, temp);
+      return;
+    }
 
     // What can it see? (Sight does not cross the east-west wrap.)
     const visionSq = c.vision * c.vision;
     const distSqTo = (o) => (o.x - c.x) * (o.x - c.x) + (o.y - c.y) * (o.y - c.y);
-    const enemy = creatureGrid.nearest(c.x, c.y, visionSq, (o) => o.energy > 0 && isHostile(c.species, o.species));
+    const enemy = creatureGrid.nearest(c.x, c.y, visionSq,
+      (o) => o.energy > 0 && isHostile(c.species, o.species) && !hiddenFrom(o, distSqTo(o)));
     const enemyDistSq = enemy ? distSqTo(enemy) : visionSq;
 
     // The best meal in sight: a plant or a carcass, weighing what this
@@ -675,7 +896,6 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // round an obstacle the creature still eats and drinks what it reaches,
     // but keeps its course rather than turning back toward what it was after.
     const course = c.heading;
-    const swimming = sim.water[cell] === 1;
     let move = c.speed * (swimming ? RULES.swimSpeedFactor : 1);
     const mustFlee = enemy
       && enemy.strength > c.strength * RULES.fleeStrengthRatio
@@ -685,6 +905,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
       && enemy.strength < c.strength * RULES.huntStrengthRatio
       && c.energy < P.huntEnergy * 2 * c.diet
       && (!meal || enemyDistSq < mealDistSq);
+
+    useAbility(c, enemy, enemyDistSq, mustFlee);
+    if (c.dashing > 0) {
+      c.dashing--;
+      move *= RULES.abilities.dash.speed;
+    }
 
     if (swimming && !c.swimmer && headTowardLand(c, cell)) {
       // Out of its depth: make for the shore before anything else.
@@ -754,13 +980,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // Being blocked is forgotten bit by bit.
     if (c.blocked && c.age % RULES.detourForgetTicks === 0 && --c.blocked === 0) c.slide = null;
 
-    // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost energy.
-    c.energy -= 0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
-      + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress
-      + (swimming ? RULES.swimCost : 0);
-    c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12)
-      * (inDrought() ? RULES.droughtThirstFactor : 1);
-    c.age++;
+    payUpkeep(c, stress, swimming, temp);
 
     // Well-fed, comfortable creatures split in two.
     const roomLeft = sim.creatures.length + born.length < RULES.maxCreatures;
@@ -768,6 +988,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.energy /= 2;
       c.offspring++;
       const child = makeOffspring(nextCreatureId++, c, sim.tick, mutationRate, P, random);
+      const chance = P.abilities ? P.abilityChance * sim.species[c.species].stage : 0;
+      if (inheritAbility(child, c, chance, random)) {
+        logEvent('mutation', 'A newborn ' + sim.species[c.species].name + ' gained ' + ABILITY_NAMES[child.ability], c.species);
+      }
       assignSpecies(child);
       born.push(child);
     }
@@ -796,6 +1020,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
     creatureGrid.clear();
     for (const c of sim.creatures) creatureGrid.add(c);
+    moveProjectiles();
 
     const born = [];
     for (const c of sim.creatures) {
@@ -817,22 +1042,27 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.creatures = survivors.concat(born);
     sim.tick++;
     countSpecies();
+    if (sim.tick % P.evolveEvery === 0) evolveSpecies();
+    if (sim.tick % RULES.abilityReviewEvery === 0) reviewAbilities();
+    sim.effects = sim.effects.filter((e) => sim.tick - e.tick < RULES.effectTicks);
   }
 
-  // Average traits, share of swimmers and highest generation for every species, indexed like
+  // Average traits, share of swimmers and of each ability, and highest generation for every species, indexed like
   // sim.species. (Head counts and kills are on the species records.)
   function stats() {
-    const out = sim.species.map(() => ({ speed: 0, vision: 0, strength: 0, preferredTemp: 0, diet: 0, swimmers: 0, maxGeneration: 0 }));
+    const out = sim.species.map(() => ({ speed: 0, vision: 0, strength: 0, preferredTemp: 0, diet: 0, swimmers: 0, maxGeneration: 0, abilities: {} }));
     for (const c of sim.creatures) {
       const s = out[c.species];
       for (const trait of TRAITS) s[trait] += c[trait];
       if (c.swimmer) s.swimmers++;
+      if (c.ability) s.abilities[c.ability] = (s.abilities[c.ability] || 0) + 1;
       if (c.generation > s.maxGeneration) s.maxGeneration = c.generation;
     }
     out.forEach((s, id) => {
       const n = sim.species[id].count || 1;
       for (const trait of TRAITS) s[trait] /= n;
       s.swimmers /= n; // the share of the species that can swim
+      for (const name in s.abilities) s.abilities[name] /= n; // the share with each ability
     });
     return out;
   }

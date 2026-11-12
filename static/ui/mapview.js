@@ -16,6 +16,15 @@ export const TERRAIN_COLORS = {
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 export const terrainColors = () => (darkQuery.matches ? TERRAIN_COLORS.dark : TERRAIN_COLORS.light);
 
+// The dot in the middle of a creature with a special ability.
+export const ABILITY_COLORS = {
+  camouflage: '#9a9a8a',
+  dash: '#f2d04b',
+  spit: '#f08a2c',
+  freeze: '#bfe8ff',
+  pull: '#e35bd0',
+};
+
 const rgbCache = new Map();
 function hexToRgb(hex) {
   let rgb = rgbCache.get(hex);
@@ -197,6 +206,19 @@ export function createMapView(canvas, sim, camera) {
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      if (c.ability) {
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(1, r * 0.45), 0, 6.29);
+        ctx.fillStyle = ABILITY_COLORS[c.ability];
+        ctx.fill();
+      }
+      if (c.frozen > 0) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 1.5, 0, 6.29);
+        ctx.strokeStyle = '#e8f6ff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
       if (c.thirsty) {
         ctx.beginPath();
         ctx.arc(x, y, r + 2, 0, 6.29);
@@ -212,6 +234,45 @@ export function createMapView(canvas, sim, camera) {
         ctx.stroke();
       }
     }
+  }
+
+  // Spit in flight, and the brief flash when an ability is used.
+  function drawAbilities(minX, maxX) {
+    ctx.fillStyle = ABILITY_COLORS.spit;
+    ctx.beginPath();
+    for (const p of sim.projectiles) {
+      if (p.x < minX || p.x > maxX) continue;
+      ctx.moveTo(p.x + 1.6, p.y);
+      ctx.arc(p.x, p.y, 1.6, 0, 6.29);
+    }
+    ctx.fill();
+
+    for (const e of sim.effects) {
+      if (e.x < minX || e.x > maxX) continue;
+      const fade = 1 - (sim.tick - e.tick) / RULES.effectTicks;
+      if (fade <= 0) continue;
+      ctx.globalAlpha = fade;
+      ctx.beginPath();
+      if (e.kind === 'freeze') {
+        // A ring that spreads out to the edge of the freeze.
+        ctx.arc(e.x, e.y, e.radius * (1.1 - fade * 0.6), 0, 6.29);
+        ctx.strokeStyle = ABILITY_COLORS.freeze;
+        ctx.lineWidth = 2;
+      } else if (e.kind === 'pull') {
+        // The line the victim was dragged along (not across the wrap seam).
+        if (Math.abs(e.fromX - e.x) > 200) continue;
+        ctx.moveTo(e.fromX, e.fromY);
+        ctx.lineTo(e.x, e.y);
+        ctx.strokeStyle = ABILITY_COLORS.pull;
+        ctx.lineWidth = 1.5;
+      } else {
+        ctx.arc(e.x, e.y, 3 + (1 - fade) * 4, 0, 6.29); // spit landing
+        ctx.strokeStyle = ABILITY_COLORS.spit;
+        ctx.lineWidth = 1.2;
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   // interp: 0..1 position between the previous tick and this one.
@@ -233,6 +294,7 @@ export function createMapView(canvas, sim, camera) {
       ctx.rect(0, 0, WIDTH, HEIGHT);
       ctx.clip();
       drawWorld(left - offset - 12, right - offset + 12, interp, selected);
+      drawAbilities(left - offset - 40, right - offset + 40);
       if (brush) {
         ctx.strokeStyle = css('--text');
         ctx.lineWidth = 1.5 / zoom;
