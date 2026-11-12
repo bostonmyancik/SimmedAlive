@@ -4,6 +4,12 @@ import { RULES } from './params.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// The energy a creature must have before it splits in two: less for small
+// creatures, more for big ones.
+export function breedEnergy(creature) {
+  return RULES.breedEnergyBase + RULES.breedEnergyPerStrength * creature.strength;
+}
+
 // A first-generation creature with its species' founding traits.
 export function spawnCreature(id, species, traits, x, y, swimmerShare, random) {
   return {

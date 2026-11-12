@@ -4,7 +4,7 @@
 import { SPECIES, DEFAULT_PARAMS, RULES } from './params.js';
 import { mulberry32 } from './rng.js';
 import { SpatialGrid } from './grid.js';
-import { spawnCreature, makeOffspring } from './creatures.js';
+import { spawnCreature, makeOffspring, breedEnergy } from './creatures.js';
 import { TRAITS, traitDistance, traitsOf, nameSpecies, colorForSpecies, normalizeFounders } from './species.js';
 import { pack, unpack } from './pack.js';
 import { ABILITIES, ABILITY_NAMES, inheritAbility, abilityPower } from './abilities.js';
@@ -982,9 +982,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
     payUpkeep(c, stress, swimming, temp);
 
-    // Well-fed, comfortable creatures split in two.
+    // Well-fed, comfortable creatures split in two. Bigger ones need more energy first.
     const roomLeft = sim.creatures.length + born.length < RULES.maxCreatures;
-    if (c.energy > RULES.breedEnergy && stress <= P.maxBreedingStress && roomLeft) {
+    if (c.energy > breedEnergy(c) && stress <= P.maxBreedingStress && roomLeft) {
       c.energy /= 2;
       c.offspring++;
       const child = makeOffspring(nextCreatureId++, c, sim.tick, mutationRate, P, random);

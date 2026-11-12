@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createSim } from '../static/sim/sim.js';
 import { inheritAbility, abilitiesFor, abilityPower } from '../static/sim/abilities.js';
+import { breedEnergy } from '../static/sim/creatures.js';
 import { RULES, SPECIES } from '../static/sim/params.js';
 import { WIDTH, HEIGHT, GRID_W, CELL, MOUNTAIN, FERTILE, DESERT, cellIndex, seasonAt } from '../static/sim/world.js';
 
@@ -316,7 +317,7 @@ test('a well-fed, comfortable creature splits and the child inherits its traits'
 function driftedParents(sim) {
   const spot = findCell(sim, inlandMild);
   const temp = sim.temperature[cellIndex(spot.x, spot.y)];
-  const drifted = { energy: 150, preferredTemp: temp, speed: 4, strength: 3.5 };
+  const drifted = { energy: 200, preferredTemp: temp, speed: 4, strength: 3.5 }; // big, so they need more to split
   return [creature({ ...spot, ...drifted }), creature({ x: spot.x + 60, y: spot.y, ...drifted })];
 }
 
@@ -908,4 +909,19 @@ test('a world with abilities in play saves and continues exactly', () => {
   }
   assert.equal(snapshot(restored), snapshot(original));
   assert.deepEqual(restored.projectiles, original.projectiles);
+});
+
+test('small creatures split with less energy than big ones', () => {
+  const splits = (strength, energy) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    sim.creatures = [creature({ ...spot, strength, energy, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] })];
+    sim.step(0, 0);
+    return sim.creatures.length === 2;
+  };
+  assert.equal(breedEnergy({ strength: 1 }), 100);
+  assert.equal(breedEnergy({ strength: 4 }), 190);
+  assert.equal(splits(1, 105), true);
+  assert.equal(splits(4, 100), false);
+  assert.equal(splits(4, 200), true);
 });
