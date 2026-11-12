@@ -162,6 +162,8 @@
   #events .crash .pip, #events .drought .pip { background: #d08a1c; }
   #events .plague .pip { background: #8e5bbf; }
   #events .meteor .pip { background: #e24b4a; }
+  #events .evolve .pip, #events .ability .pip { background: #2f8fd0; }
+  #events .mutation .pip { background: #8fb8d8; }
   button[aria-pressed=true]#inspFollow { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent); }
   .key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
 
@@ -242,6 +244,8 @@
   .marker.crash::before, .marker.drought::before { background: #d08a1c; }
   .marker.plague::before { background: #8e5bbf; }
   .marker.meteor::before { background: #e24b4a; }
+  .marker.evolve::before, .marker.ability::before { background: #2f8fd0; }
+  .marker.mutation::before { background: #8fb8d8; }
 
   /* Narrow screens: the sidebar becomes a sheet over the bottom of the map. */
   @media (max-width: 760px) {
@@ -350,7 +354,7 @@
     <div class="panel" id="tab-species" role="tabpanel">
       <div class="cardsbar"><span id="speciesSummary"></span><button id="collapseAll">Collapse all</button></div>
       <div id="cards"></div>
-      <p class="hint">Bigger body means stronger. A blue ring means thirsty. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
+      <p class="hint">Bigger body means stronger. A blue ring means thirsty, a white ring frozen. A dot in the middle marks a special ability. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
       <p class="hint" id="extinctList"></p>
     </div>
 
@@ -370,6 +374,7 @@
           <dt>Strength</dt><dd id="inspStrength"></dd>
           <dt>Diet</dt><dd id="inspDiet"></dd>
           <dt>Can swim</dt><dd id="inspSwims"></dd>
+          <dt>Ability</dt><dd id="inspAbility"></dd>
           <dt>Prefers</dt><dd id="inspPrefers"></dd>
           <dt>Temperature here</dt><dd id="inspHere"></dd>
           <dt>Born</dt><dd id="inspBorn"></dd>
@@ -408,7 +413,7 @@
     </div>
 
     <div class="panel" id="tab-events" role="tabpanel" hidden>
-      <p class="hint" id="eventsEmpty">Nothing has happened yet. New species, extinctions, booms, crashes and weather will be listed here and marked on the timeline.</p>
+      <p class="hint" id="eventsEmpty">Nothing has happened yet. New species, evolution, abilities, extinctions, booms, crashes and weather will be listed here and marked on the timeline.</p>
       <ul id="events"></ul>
     </div>
 
@@ -418,6 +423,8 @@
       <div class="field"><div class="row"><label for="mut">Mutation rate</label><output id="mutOut">0.4</output></div><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"></div>
       <div class="field"><div class="row"><label for="swimShare">Born able to swim</label><output id="swimOut">20%</output></div><input type="range" id="swimShare" min="0" max="100" step="5" value="20"></div>
       <p class="hint">Swimmers cross water and reach the plants growing in it. Everyone else has to go around.</p>
+      <label class="check"><input type="checkbox" id="abilitiesOn" checked> Special abilities</label>
+      <p class="hint">Now and then a newborn gains an ability, which its offspring inherit. Weaker creatures gain camouflage or a dash; stronger ones gain spit, freeze or a pull that drags weaker enemies in. Abilities are stronger in stronger creatures and turn up more often as a species evolves.</p>
       <h2>Disasters</h2>
       <div class="buttons">
         <button id="heat">Heat wave</button>

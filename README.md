@@ -1,6 +1,6 @@
 # Life sim
 
-Evolving species competing for food, water, and territory on a map with terrain and drifting weather. Lineages that drift far enough split into new species, and a food web forms between plant-eaters, meat-eaters and scavengers.
+Evolving species competing for food, water, and territory on a map with terrain and drifting weather. Whole species evolve over time, lineages that drift far enough split into new species, a rare few gain special abilities, and a food web forms between plant-eaters, meat-eaters and scavengers.
 
 ## Run it
 
@@ -58,6 +58,7 @@ source .venv/bin/activate && python3 app.py
   - `sim.js`: world generation and the per-tick rules. Start reading here.
   - `world.js`: map size, lakes, terrain, distance to water, temperature.
   - `creatures.js`: starting creatures and mutated offspring.
+  - `abilities.js`: special abilities: which ones a creature can gain, inheriting them, and how strong they are.
   - `species.js`: trait distance between creatures and species, and names and colours for new species.
   - `grid.js`: fast "nearest thing" lookups.
   - `rng.js`: seeded random numbers.
@@ -84,8 +85,17 @@ python3 -m unittest discover tests
 - **Diet.** Every creature has a `diet` from 0 (plants only) to 1 (meat only). A plant is worth less the more meat is in the diet, and a carcass is worth more. Every death leaves a carcass that rots after a while. Meat-eaters bite harder and hunt weaker species when hungry.
 - **Swimming.** A share of creatures (20% by default, set in Settings) are born able to swim. Swimmers cross water, more slowly and at an energy cost, and reach the plants that grow in it; everyone else goes around. Swimming is a matter of chance at birth, not inherited.
 - **Getting around obstacles.** A creature blocked by water or mountains slides along the edge and holds that course for a while before heading for its target again, so it works its way round instead of pacing in front of it. A creature caught under newly painted water or mountains can always walk out.
-- **Speciation.** Traits mutate at each birth. A newborn that has drifted too far from its species' founder joins a closely related species it resembles, or founds a new one. A species and the one it split from do not fight; all other species do. A new species is announced once it has 10 members.
-- **Events.** The sim logs new species, extinctions, booms and crashes (a population doubling or halving between checks), and every disaster.
+- **Evolution.** Every 2,000 ticks each established species shifts part of the way toward the average of its members, so a species changes as a whole instead of only ever splitting. When it has changed far enough since its last stage it reaches a new stage, which the event log describes ("faster, stronger and more meat-eating"). A stage takes much longer than a split; a species usually reaches one every 10,000 to 20,000 ticks.
+- **Speciation.** Traits mutate at each birth. A newborn that has drifted too far from its species' current traits joins a closely related species it resembles, or founds a new one. A species and the one it split from do not fight; all other species do. A new species is announced once it has 10 members.
+- **Special abilities.** A newborn rarely gains an ability (about 1 in 2,500 births at stage 1, more often at each later stage), and its offspring inherit it, though 1 in 100 loses it. Weak creatures can only gain the weak abilities and strong ones the weapons, and every ability is stronger in a stronger creature. Having one costs a little energy each tick, and each use costs energy and needs a rest before the next.
+  - **Camouflage** (strength below 1.6): enemies only notice it within 12 pixels.
+  - **Dash** (below 2.2): a burst of over twice its speed when fleeing.
+  - **Spit** (1.3 and up): spits at an enemy out of reach. The spit flies and hits the first enemy in its path.
+  - **Freeze** (1.9 and up): freezes every enemy around it, so they cannot move or fight for a while.
+  - **Pull** (2.4 and up): drags a weaker enemy to it and holds it briefly.
+
+  Creatures with an ability have a coloured dot in the middle, and frozen ones a white ring. Species cards show each ability's share. The log notes each newborn that gains one, and when an ability spreads through 40% of a species or falls below 10%. Switch abilities off in Settings.
+- **Events.** The sim logs new species, evolution stages, abilities, extinctions, booms and crashes (a population doubling or halving between checks), and every disaster.
 - **Disasters.** A drought cuts plant growth and raises thirst for 2,500 ticks. A plague kills about 60% of the most numerous species. A meteor kills everything within 90 pixels.
 
 ## Tuning
@@ -115,6 +125,11 @@ The balance settings are `DEFAULT_PARAMS`:
 | `swimmerShare` | Chance that a creature is born able to swim |
 | `autoDisasters` | Whether disasters strike by themselves (the "Random disasters" switch) |
 | `autoDisasterEvery` | Average ticks between random disasters |
-| `speciationDistance` | How far traits must drift from a species' founder before a lineage splits off |
+| `speciationDistance` | How far traits must drift from a species' current traits before a lineage splits off |
+| `evolveEvery` | Ticks between each species shifting toward its members |
+| `evolveRate` | Share of the gap between a species and its members closed each time |
+| `evolveStep` | How far a species must change to reach a new stage |
+| `abilities` | Whether creatures gain and use special abilities (the "Special abilities" switch) |
+| `abilityChance` | Chance a newborn gains an ability, times its species' stage |
 
-Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths) are in `RULES` in the same file.
+Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths, each ability's strength range, power and cooldown) are in `RULES` in the same file.

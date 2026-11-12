@@ -5,6 +5,7 @@ import { createSim } from '../sim/sim.js';
 import { randomSeed } from '../sim/rng.js';
 import { RULES, SPECIES } from '../sim/params.js';
 import { normalizeFounders, colorForSpecies } from '../sim/species.js';
+import { ABILITY_NAMES, ABILITY_HINTS } from '../sim/abilities.js';
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
@@ -153,7 +154,9 @@ function refreshSpecies() {
     card.facts.innerHTML =
       (sp.parent !== null ? '<dt>Split from</dt><dd>' + sim.species[sp.parent].name + '</dd>' : '') +
       '<dt>Diet</dt><dd>' + dietWords(st.diet) + '</dd>' +
+      '<dt>Stage</dt><dd>' + sp.stage + '</dd>' +
       '<dt>Can swim</dt><dd>' + Math.round(st.swimmers * 100) + '%</dd>' +
+      abilityFacts(st.abilities) +
       '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
       '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
       '<dt>Vision</dt><dd>' + Math.round(st.vision) + '</dd>' +
@@ -168,6 +171,14 @@ function refreshSpecies() {
   $('extinctList').textContent = extinct.length
     ? 'Extinct: ' + extinct.slice(0, 8).map((sp) => sp.name).join(', ') + (extinct.length > 8 ? ', and ' + fmt(extinct.length - 8) + ' earlier' : '')
     : '';
+}
+
+// One line per ability its members have, with the share that has it.
+function abilityFacts(shares) {
+  return Object.keys(shares).sort((a, b) => shares[b] - shares[a]).map((name) => {
+    const percent = shares[name] * 100;
+    return '<dt>' + ABILITY_NAMES[name] + '</dt><dd>' + (percent < 1 ? 'under 1' : Math.round(percent)) + '%</dd>';
+  }).join('');
 }
 
 function setMeter(id, text, fraction) {
@@ -191,7 +202,7 @@ function refreshInspector() {
   const stressed = Math.abs(gap) > sim.params.tempTolerance;
   let status;
   if (selectedDiedAt !== null) status = 'Died at tick ' + fmt(selectedDiedAt);
-  else status = [c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
+  else status = [c.frozen > 0 ? 'Frozen' : null, c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
     .filter(Boolean).join(' · ') || 'Comfortable';
 
   $('inspTitle').innerHTML = dot(sp.color) + sp.name;
@@ -205,6 +216,7 @@ function refreshInspector() {
   $('inspStrength').textContent = c.strength.toFixed(2);
   $('inspDiet').textContent = dietWords(c.diet);
   $('inspSwims').textContent = c.swimmer ? 'Yes' : 'No';
+  $('inspAbility').textContent = c.ability ? ABILITY_NAMES[c.ability] + ': ' + ABILITY_HINTS[c.ability].toLowerCase() : 'None';
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
   $('inspBorn').textContent = c.bornTick ? 'Tick ' + fmt(c.bornTick) : 'At the start';
@@ -294,6 +306,7 @@ function refreshMarkers() {
 // a loaded or rewound world brings its own values back to the controls.
 function refreshWorldSettings() {
   $('autoDisasters').checked = !!sim.params.autoDisasters;
+  $('abilitiesOn').checked = !!sim.params.abilities;
   if (document.activeElement === $('swimShare')) return;
   const percent = Math.round(sim.params.swimmerShare * 100);
   $('swimShare').value = percent;
@@ -961,6 +974,10 @@ $('swimShare').oninput = (e) => {
 };
 $('autoDisasters').onchange = (e) => {
   sim.params.autoDisasters = e.target.checked;
+  worldEdited = true;
+};
+$('abilitiesOn').onchange = (e) => {
+  sim.params.abilities = e.target.checked;
   worldEdited = true;
 };
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');

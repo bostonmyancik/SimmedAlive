@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createSim } from '../static/sim/sim.js';
+import { inheritAbility, abilitiesFor, abilityPower } from '../static/sim/abilities.js';
 import { RULES, SPECIES } from '../static/sim/params.js';
 import { WIDTH, HEIGHT, GRID_W, CELL, MOUNTAIN, FERTILE, DESERT, cellIndex, seasonAt } from '../static/sim/world.js';
 
@@ -683,4 +684,228 @@ test('an existing map can be kept and repopulated', () => {
   assert.equal(sim.tick, 0);
   assert.equal(sim.creatures.length, 0);
   assert.equal(sim.populate(), true);
+});
+
+// ---------- Evolution ----------
+
+test('a whole species shifts toward what its members have become, and reaches a new stage', () => {
+  const sim = createSim({ seed: 7, params: { evolveEvery: 50, evolveRate: 0.5, evolveStep: 0.5 } });
+  sim.generate();
+  sim.creatures = [];
+  sim.food.clear();
+  const spot = findCell(sim, inlandMild);
+  const home = sim.species[1];
+  // Members a little stronger and faster than the species started out.
+  for (let i = 0; i < 20; i++) {
+    sim.creatures.push(creature({ x: spot.x + i, y: spot.y, energy: 100, strength: home.origin.strength + 1, speed: home.origin.speed + 0.5, preferredTemp: 18 }));
+  }
+  const before = { ...home.origin };
+  for (let i = 0; i < 50; i++) sim.step(0, 0);
+  assert.ok(Math.abs(home.origin.strength - (before.strength + 0.5)) < 1e-9, 'half the gap closed');
+  assert.equal(home.stage, 2);
+  const logged = sim.events.find((e) => e.kind === 'evolve');
+  assert.ok(logged && logged.text.startsWith('Meadowfolk evolved to stage 2: stronger'), logged && logged.text);
+});
+
+test('evolution keeps a drifting species together: fewer species split off', () => {
+  const splits = (params) => {
+    const sim = createSim({ seed: 3, params });
+    sim.generate();
+    for (let i = 0; i < 20000; i++) sim.step(1, 0.4);
+    return sim.species.length;
+  };
+  assert.ok(splits({}) < splits({ evolveEvery: 1e9 }));
+});
+
+test('species from older saves start at stage 1 with no abilities', () => {
+  const sim = run(4, 50);
+  const data = JSON.parse(JSON.stringify(sim.save()));
+  for (const sp of data.species) {
+    delete sp.stage;
+    delete sp.stageOrigin;
+    delete sp.abilities;
+  }
+  for (const values of data.creatures) values.length -= 4; // no ability fields
+  delete data.projectiles;
+  const restored = createSim({ seed: 1 });
+  restored.generate();
+  restored.load(data);
+  assert.ok(restored.species.every((sp) => sp.stage === 1 && sp.abilities.length === 0));
+  assert.deepEqual(restored.species[0].stageOrigin, restored.species[0].origin);
+  assert.ok(restored.creatures.every((c) => c.ability === null && c.frozen === 0 && c.cooldown === 0));
+  for (let i = 0; i < 100; i++) restored.step(1, 0.4);
+});
+
+// ---------- Abilities ----------
+
+test('a newborn inherits its parent ability, rarely loses it, and rarely gains one suited to its strength', () => {
+  const always = () => 0, never = () => 0.999;
+  const child = { strength: 1 };
+  inheritAbility(child, { ability: 'spit' }, 0, never);
+  assert.equal(child.ability, 'spit');
+  inheritAbility(child, { ability: 'spit' }, 0, always); // the loss roll comes up
+  assert.equal(child.ability, null);
+  inheritAbility(child, { ability: null }, 0.001, never);
+  assert.equal(child.ability, null);
+
+  // Weak creatures only ever get the weak abilities, strong ones the weapons.
+  assert.deepEqual(abilitiesFor(1), ['camouflage', 'dash']);
+  assert.deepEqual(abilitiesFor(3), ['spit', 'freeze', 'pull']);
+  for (let i = 0; i < 20; i++) {
+    const weak = { strength: 0.8 }, strong = { strength: 3 };
+    const roll = (() => { let n = 0; return () => (n++ === 0 ? 0 : i / 20); })();
+    inheritAbility(weak, { ability: null }, 1, roll);
+    assert.ok(['camouflage', 'dash'].includes(weak.ability));
+    const roll2 = (() => { let n = 0; return () => (n++ === 0 ? 0 : i / 20); })();
+    inheritAbility(strong, { ability: null }, 1, roll2);
+    assert.ok(['spit', 'freeze', 'pull'].includes(strong.ability));
+  }
+  // Stronger means more powerful.
+  assert.ok(abilityPower('freeze', 3).radius > abilityPower('freeze', 2).radius);
+  assert.ok(abilityPower('spit', 3).damage > abilityPower('spit', 1.5).damage);
+});
+
+test('abilities are rare: few newborns gain one, and more as the species evolves', () => {
+  const gained = (stage) => {
+    const sim = emptyWorld();
+    sim.species[1].stage = stage;
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    let count = 0;
+    for (let i = 0; i < 4000; i++) {
+      sim.creatures = [creature({ ...spot, energy: 150, preferredTemp: temp, strength: 2 })];
+      sim.step(0, 0);
+      count += sim.creatures.filter((c) => c.ability).length;
+    }
+    return count;
+  };
+  const early = gained(1), late = gained(5);
+  assert.ok(early < 10, 'stage 1 gained ' + early + ' in 4000 births');
+  assert.ok(late > early);
+});
+
+test('freeze stops nearby enemies moving and fighting, but not its own kind', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+  const freezer = creature({ ...spot, species: 0, ability: 'freeze', strength: 2, energy: 80, preferredTemp: temp, speed: 0.01 });
+  const enemy = creature({ x: spot.x + 12, y: spot.y, species: 1, strength: 2, energy: 80, preferredTemp: temp });
+  const friend = creature({ x: spot.x - 12, y: spot.y, species: 0, energy: 80, preferredTemp: temp });
+  sim.creatures = [freezer, enemy, friend];
+  sim.step(0, 0);
+  assert.ok(enemy.frozen > 0);
+  assert.equal(friend.frozen || 0, 0);
+  assert.equal(freezer.cooldown, RULES.abilities.freeze.cooldown);
+  const at = [enemy.x, enemy.y];
+  sim.step(0, 0);
+  assert.deepEqual([enemy.x, enemy.y], at);
+  assert.equal(sim.effects[0].kind, 'freeze');
+});
+
+test('spit flies at a distant enemy and hurts it', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+  const spitter = creature({ ...spot, species: 0, ability: 'spit', strength: 2, energy: 80, preferredTemp: temp, speed: 0.01, diet: 0, vision: 60 });
+  const target = creature({ x: spot.x + 30, y: spot.y, species: 1, energy: 50, preferredTemp: temp, speed: 0.01, strength: 2 });
+  sim.creatures = [spitter, target];
+  sim.step(0, 0);
+  assert.equal(sim.projectiles.length, 1);
+  for (let i = 0; i < 10 && sim.projectiles.length; i++) sim.step(0, 0);
+  assert.equal(sim.projectiles.length, 0);
+  assert.ok(target.energy < 50 - abilityPower('spit', 2).damage + 1);
+});
+
+test('pull drags a weaker enemy in, but not a stronger one', () => {
+  const pulled = (enemyStrength) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const puller = creature({ ...spot, species: 0, ability: 'pull', strength: 3, energy: 50, diet: 1, preferredTemp: temp, speed: 0.01, vision: 60 });
+    const enemy = creature({ x: spot.x + 35, y: spot.y, species: 1, strength: enemyStrength, preferredTemp: temp, speed: 0.01, vision: 5 });
+    sim.creatures = [puller, enemy];
+    sim.step(0, 0);
+    return Math.abs(enemy.x - puller.x);
+  };
+  assert.ok(pulled(1) < 8);
+  assert.ok(pulled(3.5) > 30);
+});
+
+test('camouflage hides a creature from enemies until they are close', () => {
+  const chases = (ability, distance) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const hunter = creature({ ...spot, species: 0, strength: 3, diet: 1, energy: 20, vision: 60, preferredTemp: temp, heading: Math.PI });
+    const prey = creature({ x: spot.x + distance, y: spot.y, species: 1, strength: 1, ability, preferredTemp: temp, speed: 0.01 });
+    sim.creatures = [hunter, prey];
+    sim.step(0, 0);
+    return Math.abs(hunter.heading) < 0.3; // turned toward the prey
+  };
+  assert.equal(chases(null, 40), true);
+  assert.equal(chases('camouflage', 40), false);
+  assert.equal(chases('camouflage', 8), true);
+});
+
+test('dash carries a fleeing creature away faster', () => {
+  const fled = (ability) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const prey = creature({ ...spot, species: 1, strength: 0.8, speed: 1, ability, preferredTemp: temp, energy: 80 });
+    const threat = creature({ x: spot.x + 15, y: spot.y, species: 0, strength: 3, preferredTemp: temp, speed: 0.01, energy: 80 });
+    sim.creatures = [prey, threat];
+    sim.step(0, 0);
+    return Math.abs(prey.x - spot.x);
+  };
+  assert.ok(fled('dash') > fled(null) * 1.8);
+});
+
+test('with abilities switched off, nobody uses or gains one', () => {
+  const sim = emptyWorld();
+  sim.params.abilities = false;
+  const spot = findCell(sim, inlandMild);
+  const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+  const freezer = creature({ ...spot, species: 0, ability: 'freeze', strength: 2, energy: 80, preferredTemp: temp, speed: 0.01 });
+  const enemy = creature({ x: spot.x + 12, y: spot.y, species: 1, strength: 2, energy: 80, preferredTemp: temp });
+  sim.creatures = [freezer, enemy];
+  sim.step(0, 0);
+  assert.equal(enemy.frozen || 0, 0);
+
+  const big = createSim({ seed: 2, params: { abilities: false, abilityChance: 1 } });
+  big.generate();
+  for (let i = 0; i < 1000; i++) big.step(1, 0.4);
+  assert.ok(big.creatures.every((c) => !c.ability));
+});
+
+test('an ability that spreads through a species is logged, and so is losing it', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  for (let i = 0; i < 20; i++) sim.creatures.push(creature({ x: spot.x + i * 3, y: spot.y, energy: 100, speed: 0.01, ability: i < 12 ? 'dash' : null, preferredTemp: 18 }));
+  while (sim.tick < RULES.abilityReviewEvery) sim.step(0, 0);
+  assert.deepEqual(sim.species[1].abilities, ['dash']);
+  assert.ok(sim.events.some((e) => e.kind === 'ability' && e.text === 'Meadowfolk evolved a burst of speed'));
+  for (const c of sim.creatures) {
+    c.ability = null;
+    c.energy = 100; // nothing to eat here
+  }
+  while (sim.tick < 2 * RULES.abilityReviewEvery) sim.step(0, 0);
+  assert.deepEqual(sim.species[1].abilities, []);
+  assert.ok(sim.events.some((e) => e.text === 'Meadowfolk lost a burst of speed'));
+});
+
+test('a world with abilities in play saves and continues exactly', () => {
+  const original = createSim({ seed: 11, params: { abilityChance: 0.05 } });
+  original.generate();
+  for (let i = 0; i < 1500; i++) original.step(1, 0.4);
+  assert.ok(original.creatures.some((c) => c.ability));
+  const restored = createSim({ seed: 1 });
+  restored.generate();
+  restored.load(JSON.parse(JSON.stringify(original.save())));
+  for (let i = 0; i < 500; i++) {
+    original.step(1, 0.4);
+    restored.step(1, 0.4);
+  }
+  assert.equal(snapshot(restored), snapshot(original));
+  assert.deepEqual(restored.projectiles, original.projectiles);
 });
