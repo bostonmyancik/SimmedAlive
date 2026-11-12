@@ -6,6 +6,7 @@ import { randomSeed } from '../sim/rng.js';
 import { RULES, SPECIES } from '../sim/params.js';
 import { normalizeFounders, colorForSpecies } from '../sim/species.js';
 import { ABILITY_NAMES, ABILITY_HINTS } from '../sim/abilities.js';
+import { breedEnergy } from '../sim/creatures.js';
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
@@ -207,7 +208,8 @@ function refreshInspector() {
 
   $('inspTitle').innerHTML = dot(sp.color) + sp.name;
   $('inspStatus').textContent = status;
-  setMeter('inspEnergy', Math.max(0, c.energy).toFixed(0) + ' (splits above ' + RULES.breedEnergy + ')', c.energy / RULES.breedEnergy);
+  const splitAt = breedEnergy(c);
+  setMeter('inspEnergy', Math.max(0, c.energy).toFixed(0) + ' (splits above ' + splitAt.toFixed(0) + ')', c.energy / splitAt);
   setMeter('inspWater', Math.max(0, c.hydration).toFixed(0) + ' of 100', c.hydration / 100);
   setMeter('inspAge', fmt(c.age) + ' of ' + fmt(RULES.maxAge) + ' ticks', c.age / RULES.maxAge);
   $('inspGen').textContent = c.generation;

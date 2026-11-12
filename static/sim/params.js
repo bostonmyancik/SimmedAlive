@@ -76,7 +76,11 @@ export const RULES = {
   foodEnergy: 28,
   carcassEnergy: 100,           // meat in a dead creature (a pure meat-eater gets all of it)
   carcassLifetime: 600,        // ticks before a carcass rots away
-  breedEnergy: 110,            // a creature above this splits in two
+  // A creature splits in two once its energy is above
+  // breedEnergyBase + breedEnergyPerStrength x strength, so small creatures
+  // breed sooner and big ones need more. Strength 1.3 splits at 109, 3 at 160.
+  breedEnergyBase: 70,
+  breedEnergyPerStrength: 30,
   attackRangeSq: 49,
   minEatRangeSq: 36,
 
