@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createSim } from '../static/sim/sim.js';
 import { inheritAbility, abilitiesFor, abilityPower } from '../static/sim/abilities.js';
 import { breedEnergy } from '../static/sim/creatures.js';
-import { RULES, SPECIES } from '../static/sim/params.js';
+import { RULES, SPECIES, DEFAULT_PARAMS } from '../static/sim/params.js';
 import { WIDTH, HEIGHT, GRID_W, CELL, MOUNTAIN, FERTILE, DESERT, cellIndex, seasonAt } from '../static/sim/world.js';
 
 const snapshot = (sim) => JSON.stringify([sim.creatures, [...sim.food], sim.species, Array.from(sim.terrain)]);
@@ -140,6 +140,25 @@ test('a meat-eater gets nothing from plants and leaves them alone', () => {
   sim.step(0, 0);
   assert.equal(sim.food.size, 1);
   assert.ok(c.energy < 60);
+});
+
+test('an in-between diet gets less from a plant than its share of plants in the diet', () => {
+  // Energy after one tick beside a plant, less the same creature's upkeep with no plant.
+  const gain = (diet) => {
+    const energyAfter = (withPlant) => {
+      const sim = emptyWorld();
+      const spot = findCell(sim, inlandMild);
+      const c = creature({ ...spot, diet, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] });
+      sim.creatures = [c];
+      if (withPlant) sim.addFood(spot.x + 2, spot.y);
+      sim.step(0, 0);
+      return c.energy;
+    };
+    return energyAfter(true) - energyAfter(false);
+  };
+  assert.ok(Math.abs(gain(0) - RULES.foodEnergy) < 1e-9, 'a plant-eater gets all of it');
+  assert.ok(Math.abs(gain(0.5) - RULES.foodEnergy * 0.5 ** DEFAULT_PARAMS.dietSpecialization) < 1e-9);
+  assert.ok(gain(0.5) < RULES.foodEnergy / 2);
 });
 
 test('food can be dropped in water but not on mountains', () => {
@@ -723,16 +742,32 @@ test('a whole species shifts toward what its members have become, and reaches a 
   assert.ok(logged && logged.text.startsWith('Meadowfolk evolved to stage 2: stronger'), logged && logged.text);
 });
 
-test('evolution keeps a drifting species together: fewer species split off', () => {
-  // Counts the species that were announced (reached 10 members), over two
-  // worlds, since a single world can go either way.
-  const splits = (params) => [1, 2].reduce((total, seed) => {
-    const sim = createSim({ seed, params });
+test('evolution keeps a drifting species together: its newborns no longer split off', () => {
+  // Members that have all drifted past the split distance from where the
+  // species started. With evolution the species catches up with them, so a
+  // newborn like them stays; without it, the newborn founds a new species.
+  const speciesOfNewborn = (evolveEvery) => {
+    const sim = createSim({ seed: 7, params: { evolveEvery, evolveRate: 0.5 } });
     sim.generate();
-    for (let i = 0; i < 20000; i++) sim.step(1, 0.4);
-    return total + sim.species.filter((sp) => sp.established).length;
-  }, 0);
-  assert.ok(splits({}) < splits({ evolveEvery: 1e9 }));
+    sim.creatures = [];
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const strength = sim.species[1].origin.strength + 2;
+    for (let i = 0; i < 20; i++) {
+      sim.creatures.push(creature({ x: spot.x + i, y: spot.y, energy: 100, strength, preferredTemp: temp }));
+    }
+    for (let i = 0; i < 50; i++) sim.step(0, 0);
+    const parent = sim.creatures[0];
+    parent.energy = 400;
+    const ids = new Set(sim.creatures.map((c) => c.id));
+    sim.step(0, 0);
+    const child = sim.creatures.find((c) => !ids.has(c.id));
+    assert.ok(child, 'the parent split');
+    return child.species;
+  };
+  assert.equal(speciesOfNewborn(50), 1);
+  assert.notEqual(speciesOfNewborn(1e9), 1);
 });
 
 test('species from older saves start at stage 1 with no abilities', () => {
