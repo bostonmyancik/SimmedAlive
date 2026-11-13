@@ -67,6 +67,15 @@ export function buildReport({ sim, history = [], latestTick = sim.tick, settings
   const { year, season } = seasonAt(sim.tick);
   const scenario = sim.params.scenario ? SCENARIOS.find((s) => s.key === sim.params.scenario) : null;
 
+  // The nearest ancestor that took hold, so the family tree never points at a
+  // species the report leaves out.
+  const shownIds = new Set(established.map((sp) => sp.id));
+  const treeParent = (sp) => {
+    let p = sp.parent;
+    while (p !== null && !shownIds.has(p)) p = sim.species[p].parent;
+    return p;
+  };
+
   const describe = (sp) => {
     const st = stats[sp.id];
     const alive = sp.count > 0;
@@ -79,6 +88,7 @@ export function buildReport({ sim, history = [], latestTick = sim.tick, settings
       count: sp.count,
       share: total ? sp.count / total : 0,
       parent: sp.parent === null ? null : sim.species[sp.parent].name,
+      treeParent: treeParent(sp),
       lineage: sim.lineage(sp.id).map((id) => sim.species[id].name),
       bornTick: sp.bornTick,
       extinctTick: alive ? null : sp.extinctTick,

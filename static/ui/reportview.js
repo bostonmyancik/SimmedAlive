@@ -2,7 +2,7 @@
 // that opened it for a report (see report.js) and lays it out. The report is a
 // snapshot: press Refresh to rebuild it from the world as it is now.
 
-import { METRICS, drawLineChart } from './charts.js';
+import { METRICS, drawLineChart, drawFamilyTree } from './charts.js';
 import { speciesCsv } from './report.js';
 
 const $ = (id) => document.getElementById(id);
@@ -112,6 +112,29 @@ function renderSpecies(r) {
     : '<tbody><tr><td class="muted">No species has died out yet.</td></tr></tbody>';
 }
 
+// Every species that took hold, from the start of the run to now, each
+// branching from the one it split from.
+function renderTree(r) {
+  const all = [...r.living, ...r.extinct];
+  $('treeHint').textContent = all.length
+    ? fmt(all.length) + ' species over the whole run, ' + fmt(r.living.length) + ' still alive. Each line runs from when the species appeared to now, or to a cross where it died out, and branches from the one it split from.'
+    : 'No species yet.';
+  $('treeNow').textContent = 'Tick ' + fmt(r.world.tick);
+  drawTree();
+}
+
+function drawTree() {
+  if (!latest) return;
+  const r = latest.report;
+  // drawFamilyTree looks parents up by id, so place each species at its id.
+  const byId = [];
+  const tree = [...r.living, ...r.extinct].sort((a, b) => a.id - b.id).map((sp) => (byId[sp.id] = {
+    id: sp.id, name: sp.name, color: sp.color, parent: sp.treeParent, count: sp.count,
+    bornTick: sp.bornTick, extinctTick: sp.alive ? null : sp.extinctTick,
+  }));
+  drawFamilyTree($('tree'), tree, byId, r.world.tick, 0);
+}
+
 function renderCreatures(r) {
   const rows = Object.values(r.creatures).filter((row) => row.mean !== undefined);
   const places = (label) => (/Speed|Strength/.test(label) ? 2 : /meat/.test(label) ? 2 : 1);
@@ -175,6 +198,7 @@ function render() {
   renderOverview(r);
   renderPopulation(r);
   renderSpecies(r);
+  renderTree(r);
   renderCreatures(r);
   renderRecords(r);
   renderSettings(r);
@@ -217,5 +241,5 @@ $('eventFilter').onclick = (e) => {
   eventKind = button.dataset.kind || null;
   renderEvents(latest.report);
 };
-window.addEventListener('resize', drawChart);
+window.addEventListener('resize', () => { drawChart(); drawTree(); });
 refresh();
