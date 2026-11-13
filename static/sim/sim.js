@@ -113,6 +113,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     plague,
     meteor,
     paintTerrain,
+    fillTerrain,
     paintTemperature,
     save,
     load,
@@ -158,7 +159,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
   //             'keep' leaves the terrain as it is.
   //   populate: false leaves the world empty until populate() is called, so
   //             the map can be painted first.
-  function generate(newSeed = sim.seed, { map = 'random', populate: populateNow = true } = {}) {
+  //   lakes:    how many lakes a random map has (RULES.lakeCount by default)
+  function generate(newSeed = sim.seed, { map = 'random', populate: populateNow = true, lakes = RULES.lakeCount } = {}) {
     sim.seed = newSeed;
     random = mulberry32(newSeed);
     nextCreatureId = 1;
@@ -181,7 +183,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       sim.terrain.fill(PLAIN);
       computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
     } else if (map !== 'keep') {
-      generateLakes(sim.water, random);
+      generateLakes(sim.water, random, lakes);
       generateMountains(sim.terrain, sim.water, random);
       computeWaterDistance(sim.water, sim.terrain, sim.waterDistance);
       classifyLand(sim.terrain, sim.water, sim.waterDistance, random);
@@ -376,6 +378,38 @@ export function createSim({ seed = 1, params = {} } = {}) {
       sim.terrain[cell] = kind === 'water' ? PLAIN : PAINT_KINDS[kind];
     });
     terrainChanged();
+  }
+
+  // Paints the whole connected area of the same terrain as the cell at (x, y),
+  // like a paint bucket. Returns how many cells changed.
+  function fillTerrain(x, y, kind) {
+    if (kind !== 'water' && !(kind in PAINT_KINDS)) throw new Error('Unknown terrain: ' + kind);
+    const start = cellIndex(x, y);
+    const isWater = sim.water[start], land = sim.terrain[start];
+    const same = (cell) => sim.water[cell] === isWater && (isWater || sim.terrain[cell] === land);
+    const newWater = kind === 'water' ? 1 : 0, newLand = kind === 'water' ? PLAIN : PAINT_KINDS[kind];
+    if (isWater === newWater && (isWater || land === newLand)) return 0;
+    const seen = new Uint8Array(sim.water.length);
+    const queue = [start];
+    seen[start] = 1;
+    let changed = 0;
+    while (queue.length) {
+      const cell = queue.pop();
+      sim.water[cell] = newWater;
+      sim.terrain[cell] = newLand;
+      changed++;
+      const gx = cell % GRID_W, gy = (cell / GRID_W) | 0;
+      const next = [gy * GRID_W + (gx + 1) % GRID_W, gy * GRID_W + (gx - 1 + GRID_W) % GRID_W];
+      if (gy > 0) next.push(cell - GRID_W);
+      if (gy < GRID_H - 1) next.push(cell + GRID_W);
+      for (const n of next) {
+        if (seen[n] || !same(n)) continue;
+        seen[n] = 1;
+        queue.push(n);
+      }
+    }
+    terrainChanged();
+    return changed;
   }
 
   // Warms (positive `degrees`) or cools a circle, strongest at the centre.
@@ -992,7 +1026,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (c.immune > 0) c.immune--;
     if (c.sick > 0) {
       creatureGrid.forEachNear(c.x, c.y, rule.contactRange, (o) => {
-        if (o.species === c.species && !o.sick && !o.immune && o.energy > 0 && random() < rule.spreadChance) {
+        if (o.species === c.species && !o.sick && !o.immune && o.energy > 0 && random() < rule.spreadChance * P.sicknessBoost) {
           o.sick = rule.length;
           note(o, 'Caught a sickness from one of its own kind');
         }

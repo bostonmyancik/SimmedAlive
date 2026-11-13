@@ -7,6 +7,7 @@ import { RULES, SPECIES, DEFAULT_PARAMS } from '../sim/params.js';
 import { normalizeFounders, colorForSpecies } from '../sim/species.js';
 import { ABILITY_NAMES, ABILITY_HINTS } from '../sim/abilities.js';
 import { breedEnergy } from '../sim/creatures.js';
+import { SCENARIOS, SCENARIO_PARAMS } from '../sim/scenarios.js';
 import { TOAST_GROUPS, tidyToastSettings, wantsToast, createToasts } from './toasts.js';
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, timeOfDay, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
@@ -295,6 +296,7 @@ function refreshRecords() {
     : '–';
   const { year } = seasonAt(sim.tick);
   $('worldFacts').innerHTML =
+    (sim.params.scenario ? '<dt>Scenario</dt><dd>' + (SCENARIOS.find((s) => s.key === sim.params.scenario) || { name: sim.params.scenario }).name + '</dd>' : '') +
     '<dt>Age</dt><dd>' + fmt(sim.tick) + ' ticks (year ' + year + ')</dd>' +
     '<dt>Births</dt><dd>' + fmt(r.births) + '</dd>' +
     '<dt>Deaths</dt><dd>' + fmt(r.deaths) + '</dd>' +
@@ -462,12 +464,16 @@ function setTool(name) {
   canvas.classList.toggle('brush', name !== 'select');
   $('toolopts').hidden = !(name in TOOL_TIPS);
   $('kinds').hidden = name !== 'terrain';
-  $('sizeRow').hidden = !BRUSH_TOOLS.includes(name);
-  $('toolTip').textContent = TOOL_TIPS[name] || '';
+  const filling = name === 'terrain' && $('fillMode').checked;
+  $('fillRow').hidden = name !== 'terrain';
+  $('sizeRow').hidden = !BRUSH_TOOLS.includes(name) || filling;
+  $('toolTip').textContent = filling ? 'Click to fill the whole connected area of one kind of land, or one stretch of water.' : TOOL_TIPS[name] || '';
   // Show the layer the tool changes.
   if (name === 'terrain') setLayer('none');
   if (name === 'warm' || name === 'cool') setLayer('temperature');
 }
+
+const fillingTerrain = () => tool === 'terrain' && $('fillMode').checked;
 
 function brushRadius() {
   return tool === 'meteor' ? RULES.meteorRadius : +$('brushSize').value;
@@ -475,7 +481,7 @@ function brushRadius() {
 
 // The circle to outline under the pointer, in world pixels.
 function brushOutline() {
-  if (!hover || tool === 'select') return null;
+  if (!hover || tool === 'select' || fillingTerrain()) return null;
   const at = camera.toWorld(hover.x, hover.y);
   return { x: at.x, y: at.y, radius: brushRadius() };
 }
@@ -483,8 +489,32 @@ function brushOutline() {
 // ---------- World ----------
 
 function newWorld(seed) {
+  clearScenario();
   sim.generate(seed);
   showWorld();
+}
+
+// Puts back the settings a scenario changed.
+function clearScenario() {
+  for (const key of SCENARIO_PARAMS) sim.params[key] = DEFAULT_PARAMS[key];
+}
+
+// Starts a new world from a scenario: its settings, and its founders in place
+// of yours for this world only.
+function startScenario(key) {
+  const scenario = SCENARIOS.find((s) => s.key === key);
+  clearScenario();
+  Object.assign(sim.params, scenario.params || {}, { scenario: key });
+  const yours = sim.founders;
+  if (scenario.founders) sim.setFounders(scenario.founders(originalFounders()));
+  sim.generate(randomSeed(), { lakes: scenario.lakes });
+  sim.founders = yours;
+  showWorld();
+}
+
+function renderScenarios() {
+  $('scenarios').innerHTML = SCENARIOS.map((s) =>
+    '<li><button data-scenario="' + s.key + '">' + s.name + '</button><span>' + s.text + '</span></li>').join('');
 }
 
 // Points the page at whatever world the sim now holds (new or loaded).
@@ -602,6 +632,7 @@ function addFounder() {
 
 // Starts an empty world to paint: open land ('blank') or the present map ('keep').
 function buildMap(kind) {
+  clearScenario();
   sim.generate(kind === 'blank' ? randomSeed() : sim.seed, { map: kind, populate: false });
   $('buildText').textContent = BUILD_TIP;
   showWorld();
@@ -782,7 +813,15 @@ function creatureNear(at) {
 function clickMap(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
-  if (tool === 'meteor') {
+  if (fillingTerrain()) {
+    branchHere();
+    if (sim.fillTerrain(at.x, at.y, brushKind)) {
+      worldWasEdited();
+      map.paintWorld();
+      map.paintLayer();
+      refreshAll();
+    }
+  } else if (tool === 'meteor') {
     branchHere();
     sim.meteor(at.x, at.y);
     worldWasEdited();
@@ -813,7 +852,7 @@ canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, { ...pointerPos(e), startX: e.clientX, startY: e.clientY });
   if (pointers.size === 1) {
     dragged = false;
-    painting = e.button === 0 && BRUSH_TOOLS.includes(tool);
+    painting = e.button === 0 && BRUSH_TOOLS.includes(tool) && !fillingTerrain();
     if (painting) paint(pointerPos(e).x, pointerPos(e).y);
   } else {
     painting = false;
@@ -1141,6 +1180,12 @@ $('resetFounders').onclick = () => {
   renderFounders();
 };
 $('blankMap').onclick = () => buildMap('blank');
+renderScenarios();
+$('scenarios').onclick = (e) => {
+  const button = e.target.closest('button[data-scenario]');
+  if (button) startScenario(button.dataset.scenario);
+};
+$('fillMode').onchange = () => setTool(tool);
 $('editMap').onclick = () => buildMap('keep');
 $('release').onclick = releaseSpecies;
 $('buildText').textContent = BUILD_TIP;

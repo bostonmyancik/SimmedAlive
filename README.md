@@ -27,7 +27,7 @@ source .venv/bin/activate && python3 app.py
 - **Tools** (left rail, keys `1` to `6`):
   - Select inspects the creature you click.
   - Food scatters plants as you drag.
-  - Terrain paints water, fertile land, plain, desert or mountain.
+  - Terrain paints water, fertile land, plain, desert or mountain. Brushes go up to 240 pixels across. Tick "Fill the whole area I click" to fill a whole connected stretch of one kind of land, or one lake, at a click, like a paint bucket.
   - Warm and Cool change the temperature of an area; the change fades over a few thousand ticks.
   - Meteor strikes where you click: everything in the circle dies and the land is scorched.
   - With a brush tool active, pan by dragging with the right or middle button, or with two fingers.
@@ -40,6 +40,7 @@ source .venv/bin/activate && python3 app.py
 - **Pop-up alerts**: as the world runs, events pop up in the top-right corner of the map (at most three at a time; a burst shows the newest with a count of the rest). Each fades after six seconds; click one to open the Events tab, or × to dismiss it. In Settings under "Notifications", switch them off altogether or choose which kinds pop up: new species, extinctions, booms and crashes, evolution stages, abilities spreading or lost, newborns gaining an ability (off by default, as it is frequent), heat, cold and droughts, plagues and meteors, and sickness breaking out or passing. Only events from the running world pop up, not ones you cause with the disaster buttons or pass while rewinding. The choices are remembered by the browser.
 - **Bottom bar**: pause (or Space), speed, and the tick, year and season.
 - **Your own species** (Settings, "Founding species"): every new world starts with the species listed there. Change each one's name, colour, starting number, speed, strength, vision, preferred temperature and share of meat in its diet; add species (up to 8) or remove them; "Restore the originals" brings back the four the sim ships with. Numbers outside the allowed range are pulled back into it. The list is remembered by the browser and applies to the next new world, not the one running.
+- **Scenarios** (Settings): ready-made worlds. Ice age (10 degrees colder), Hothouse (9 degrees warmer with a fifth less plant growth), Island chain (three times the lakes, half the founders swim), Predator paradise (four times the Nightstalkers plus a second meat-eater, the Duskfangs), One species (200 Meadowfolk and nobody else, to watch them split into new species) and Crowded world (200 of every founder, with sickness spreading twice as easily). The changes apply to that world only, and the Records tab names the scenario. "New world" goes back to your usual settings and species.
 - **Your own map** (Settings, "Your own map"): "Start a blank map" gives open land with no water; "Clear and edit this map" keeps the present terrain but removes everything living. Either way the world waits, empty, while you paint it with the Terrain tool, and a bar on the map offers "Release the species" when you are ready. There must be some water with land beside it, since creatures need to drink. Each species starts in the band of latitude that suits its climate if there is room there, and anywhere livable otherwise. To keep a map, save the world under a name before or after releasing.
 - **Settings**: food supply, mutation rate, the share of founders able to swim, switches for day and night, sickness, herds and packs, migration and spreading plants, disasters (heat wave, cold snap, drought, plague, and a "Random disasters" switch that lets them and meteors strike by themselves about once a year), the world seed, and saved worlds. The running world is autosaved every five seconds and picked up again when the page loads, so a refresh or restart loses at most a few seconds. You can also save worlds under a name and load or delete them later. A loaded world carries on exactly where it left off, charts included. "New world" picks a new seed; the same seed always builds the same world, and the address bar (`/?seed=123`) can be shared. Opening an address whose seed differs from the autosave starts that world fresh.
 
@@ -58,6 +59,7 @@ source .venv/bin/activate && python3 app.py
   - `popout.js`: the large charts view.
   - `toasts.js`: pop-up alerts for events and which kinds to show.
 - `static/sim/`: the simulation. No page code, so it also runs under Node.
+  - `scenarios.js`: the ready-made worlds offered in Settings.
   - `params.js`: every tuning value (species traits, balance settings, fixed rules).
   - `sim.js`: world generation and the per-tick rules. Start reading here.
   - `world.js`: map size, lakes, terrain, distance to water, temperature.

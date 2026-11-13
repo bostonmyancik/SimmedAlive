@@ -17,6 +17,8 @@ export const DEFAULT_PARAMS = {
   tempGradient: 13,        // north-south spread, plus or minus this around BASE_TEMP
   seasonSwing: 3,          // size of the seasonal swing in degrees
   frontStrength: 8,        // peak degrees added (or removed) by a weather front
+  climateShift: 0,         // degrees added everywhere, for colder or hotter worlds
+  scenario: null,          // key of the scenario the world was started from (see scenarios.js), if any
 
   // Food
   foodGrowth: 26,          // multiplier on the food supply slider
@@ -56,6 +58,7 @@ export const DEFAULT_PARAMS = {
   // Living world
   plantSeeding: 0.25,       // share of new plants that sprout beside an existing one
   disease: true,           // let sickness break out and spread between creatures of a species
+  sicknessBoost: 1,        // multiplier on how easily sickness passes between creatures
   herding: 0.15,           // how strongly an idle creature drifts toward others of its species (0 to 1)
   migration: true,         // creatures well out of their climate set off toward a better one
   dayNight: true,          // days and nights: sight is short at night except for night eyes

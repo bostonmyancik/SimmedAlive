@@ -23,9 +23,9 @@ export function wrapDistance(delta, span) {
 }
 
 // Fills `water` (1 = water, 0 = land) with a few irregular lakes.
-export function generateLakes(water, random) {
+export function generateLakes(water, random, count = RULES.lakeCount) {
   water.fill(0);
-  for (let k = 0; k < RULES.lakeCount; k++) {
+  for (let k = 0; k < count; k++) {
     const cx = random() * GRID_W;
     const cy = 3 + random() * (GRID_H - 6);
     const radius = 2.2 + random() * 2.8;
@@ -151,7 +151,7 @@ export function seasonAt(tick) {
 // season, any heat wave or cold snap (`boost`), the weather fronts, and
 // `offset`, the per-cell warming or cooling left by brushes and meteors.
 export function updateTemperature(temperature, fronts, tick, boost, params, offset) {
-  const season = params.seasonSwing * Math.sin(tick / RULES.seasonLength) + boost;
+  const season = params.seasonSwing * Math.sin(tick / RULES.seasonLength) + boost + (params.climateShift || 0);
   for (let gy = 0; gy < GRID_H; gy++) {
     for (let gx = 0; gx < GRID_W; gx++) {
       const x = gx * CELL + 5, y = gy * CELL + 5;

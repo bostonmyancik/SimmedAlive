@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createSim } from '../static/sim/sim.js';
 import { inheritAbility, abilitiesFor, abilityPower } from '../static/sim/abilities.js';
 import { breedEnergy } from '../static/sim/creatures.js';
+import { SCENARIOS } from '../static/sim/scenarios.js';
 import { RULES, SPECIES, DEFAULT_PARAMS } from '../static/sim/params.js';
 import { WIDTH, HEIGHT, GRID_W, CELL, MOUNTAIN, FERTILE, DESERT, cellIndex, seasonAt, timeOfDay } from '../static/sim/world.js';
 
@@ -816,6 +817,52 @@ test('a watched creature that runs out of energy is noted as starved', () => {
   sim.watch(c.id);
   sim.step(0, 0);
   assert.deepEqual(sim.biography.entries.map((e) => e.text), ['Starved']);
+});
+
+// ---------- Scenarios and map tools ----------
+
+test('fill paints the whole connected area and nothing beyond it', () => {
+  const sim = createSim({ seed: 7 });
+  sim.generate();
+  const lake = sim.water.indexOf(1);
+  const x = (lake % GRID_W) * CELL + 5, y = Math.floor(lake / GRID_W) * CELL + 5;
+  const waterBefore = sim.water.reduce((a, b) => a + b, 0);
+  const changed = sim.fillTerrain(x, y, 'fertile');
+  assert.ok(changed > 1);
+  assert.equal(sim.water.reduce((a, b) => a + b, 0), waterBefore - changed, 'only that lake was filled in');
+  assert.equal(sim.water[lake], 0);
+  assert.equal(sim.terrain[lake], FERTILE);
+  assert.equal(sim.blocked[lake], 0);
+  assert.equal(sim.fillTerrain(x, y, 'fertile'), 0, 'filling with the same kind changes nothing');
+});
+
+test('a climate shift warms or cools the whole world', () => {
+  const mean = (params) => {
+    const sim = createSim({ seed: 7, params });
+    sim.generate();
+    return sim.temperature.reduce((a, b) => a + b, 0) / sim.temperature.length;
+  };
+  assert.ok(Math.abs(mean({ climateShift: -10 }) - mean({}) + 10) < 1e-3);
+});
+
+test('a random map can be given more lakes', () => {
+  const water = (lakes) => {
+    const sim = createSim({ seed: 7 });
+    sim.generate(7, { lakes });
+    return sim.water.reduce((a, b) => a + b, 0);
+  };
+  assert.ok(water(RULES.lakeCount * 3) > water(RULES.lakeCount) * 1.8);
+});
+
+test('every scenario builds a living world', () => {
+  for (const scenario of SCENARIOS) {
+    const sim = createSim({ seed: 5, params: scenario.params || {} });
+    if (scenario.founders) sim.setFounders(scenario.founders(SPECIES.map((f) => ({ ...f }))));
+    sim.generate(5, { lakes: scenario.lakes });
+    assert.ok(sim.creatures.length > 0, scenario.name);
+    for (let i = 0; i < 200; i++) sim.step(1, 0.4);
+    assert.ok(sim.creatures.length > 0, scenario.name + ' died at once');
+  }
 });
 
 const sim0 = () => createSim({ seed: 1 });
