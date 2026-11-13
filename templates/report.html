@@ -30,6 +30,9 @@
     background: var(--surface); color: var(--text); border: 1px solid var(--border);
   }
   button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #storyHint { margin: 6px 0 0; }
+  #storyHint[hidden] { display: none; }
   a { color: var(--accent); }
   #status { color: var(--text-secondary); margin: 18px 0; }
   #status[hidden], main[hidden] { display: none; }
@@ -80,12 +83,15 @@
   <h1>Life sim report</h1>
   <span id="madeAt"></span>
   <div class="actions">
+    <button id="copyStory" class="primary" title="Copy this world's history as text to paste into a chat with Claude">Copy for Claude</button>
+    <button id="downloadStory" title="The same text as a Markdown file you can attach to a chat">Download story file</button>
     <button id="refresh" title="Rebuild the report from the world as it is now">Refresh</button>
     <button id="downloadJson">Download JSON</button>
     <button id="downloadCsv">Download species CSV</button>
     <button id="print">Print</button>
   </div>
 </header>
+<p class="hint" id="storyHint" hidden></p>
 <p id="status">Connecting to the life sim…</p>
 <main hidden>
   <nav>

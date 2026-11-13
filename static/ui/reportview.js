@@ -4,6 +4,7 @@
 
 import { METRICS, drawLineChart, drawFamilyTree } from './charts.js';
 import { speciesCsv } from './report.js';
+import { storyText } from './story.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -231,6 +232,43 @@ function download(name, text, type) {
 
 const fileName = (ext) => 'lifesim-seed' + latest.report.world.seed + '-tick' + latest.report.world.tick + '.' + ext;
 
+// Copies the story text. The clipboard can be refused (an embedded page, an
+// older browser), so fall back to selecting a hidden text box and copying that.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const box = document.createElement('textarea');
+    box.value = text;
+    box.style.position = 'fixed';
+    box.style.opacity = '0';
+    document.body.append(box);
+    box.select();
+    const ok = document.execCommand('copy');
+    box.remove();
+    return ok;
+  }
+}
+
+function storyHint(text) {
+  $('storyHint').textContent = text;
+  $('storyHint').hidden = false;
+}
+
+$('copyStory').onclick = async () => {
+  if (!latest) return;
+  const text = storyText(latest.report);
+  const kb = Math.max(1, Math.round(text.length / 1024));
+  storyHint(await copyText(text)
+    ? 'Copied ' + kb + ' KB of text. Paste it into a chat with Claude; it starts by asking for a story about this world.'
+    : 'The browser would not copy. Use Download story file instead and attach it to the chat.');
+};
+$('downloadStory').onclick = () => {
+  if (!latest) return;
+  download(fileName('md').replace('.md', '-story.md'), storyText(latest.report), 'text/markdown');
+  storyHint('Attach the downloaded file to a chat with Claude and ask for a story, or just send it as it is: it starts by asking for one.');
+};
 $('refresh').onclick = refresh;
 $('print').onclick = () => window.print();
 $('downloadJson').onclick = () => latest && download(fileName('json'), JSON.stringify(latest.report, null, 2), 'application/json');
