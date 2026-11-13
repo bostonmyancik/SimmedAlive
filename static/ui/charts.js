@@ -242,7 +242,8 @@ export function drawTimeline(canvas, history, species, tick) {
 // `species` should hold only the species worth showing (see familyTreeSpecies);
 // a species whose parent is not among them hangs off its nearest ancestor
 // that is, or stands alone.
-export function drawFamilyTree(canvas, species, allSpecies, tick) {
+// `from` is the tick at the left edge; the report passes 0 to show the whole run.
+export function drawFamilyTree(canvas, species, allSpecies, tick, from = windowStart(tick)) {
   const shown = new Set(species.map((sp) => sp.id));
   const parentOf = (sp) => {
     let p = sp.parent;
@@ -269,7 +270,7 @@ export function drawFamilyTree(canvas, species, allSpecies, tick) {
   if (!p) return;
   const { ctx, w } = p;
   const left = 4, right = w - 10;
-  const start = windowStart(tick);
+  const start = from;
   const xOf = (t) => left + (tick > start ? Math.max(0, t - start) / (tick - start) : 0) * (right - left);
   const yOf = (id) => rowOf.get(id) * TREE_ROW + 19;
   const textColor = css('--text-secondary'), mutedColor = css('--text-muted');

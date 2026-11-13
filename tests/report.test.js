@@ -53,3 +53,17 @@ test('the species CSV has a header and a line per species, with commas quoted', 
   assert.match(lines[0], /^name,status,count/);
   assert.ok(lines.some((line) => line.startsWith('"Odd, ""named"""')));
 });
+
+test('the family tree links each species to an ancestor the report includes', () => {
+  const { sim, history } = runWorld(200);
+  // A species that never took hold, sitting between a founder and its grandchild.
+  const founder = sim.species[0];
+  const hidden = { ...founder, id: sim.species.length, name: 'Brief', parent: 0, established: false, count: 0, extinctTick: 50 };
+  const grandchild = { ...founder, id: hidden.id + 1, name: 'Late', parent: hidden.id, established: true, count: 0, bornTick: 60, extinctTick: 150 };
+  sim.species.push(hidden, grandchild);
+  const report = buildReport({ sim, history });
+  const all = [...report.living, ...report.extinct];
+  const ids = new Set(all.map((sp) => sp.id));
+  for (const sp of all) assert.ok(sp.treeParent === null || ids.has(sp.treeParent), sp.name + ' links to ' + sp.treeParent);
+  assert.equal(all.find((sp) => sp.name === 'Late').treeParent, 0);
+});
