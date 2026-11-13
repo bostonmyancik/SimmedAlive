@@ -11,6 +11,7 @@ export const TOAST_GROUPS = [
   { key: 'mutation', label: 'Newborns gaining an ability', kinds: ['mutation'], on: false },
   { key: 'weather', label: 'Heat, cold and droughts', kinds: ['heat', 'cold', 'drought'], on: true },
   { key: 'disaster', label: 'Plagues and meteors', kinds: ['plague', 'meteor'], on: true },
+  { key: 'sickness', label: 'Sickness breaking out or passing', kinds: ['sickness'], on: true },
 ];
 
 const SHOW_FOR = 6000;  // milliseconds a toast stays up

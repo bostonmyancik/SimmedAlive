@@ -5,7 +5,7 @@ import { createSim } from '../static/sim/sim.js';
 import { inheritAbility, abilitiesFor, abilityPower } from '../static/sim/abilities.js';
 import { breedEnergy } from '../static/sim/creatures.js';
 import { RULES, SPECIES, DEFAULT_PARAMS } from '../static/sim/params.js';
-import { WIDTH, HEIGHT, GRID_W, CELL, MOUNTAIN, FERTILE, DESERT, cellIndex, seasonAt } from '../static/sim/world.js';
+import { WIDTH, HEIGHT, GRID_W, CELL, MOUNTAIN, FERTILE, DESERT, cellIndex, seasonAt, timeOfDay } from '../static/sim/world.js';
 
 const snapshot = (sim) => JSON.stringify([sim.creatures, [...sim.food], sim.species, Array.from(sim.terrain)]);
 
@@ -223,17 +223,36 @@ test('a non-swimmer that ends up in the water can walk out', () => {
   assert.equal(sim.water[cellIndex(c.x, c.y)], 0);
 });
 
-test('newborns can swim according to the swimmer share, whatever their parent does', () => {
+test('the founders swim according to the swimmer share, and their young inherit it', () => {
   for (const share of [0, 1]) {
     const sim = createSim({ seed: 7, params: { swimmerShare: share } });
     sim.generate();
     assert.ok(sim.creatures.every((c) => c.swimmer === (share === 1)));
-    sim.food.clear();
-    const spot = findCell(sim, inlandMild);
-    sim.creatures = [creature({ ...spot, swimmer: share === 0, energy: 150, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] })];
-    sim.step(0, 0);
-    assert.equal(sim.creatures[1].swimmer, share === 1);
   }
+  // Over many births, about 1 in 50 young differs from its parent.
+  const sim = createSim({ seed: 7, params: { swimmerShare: 0 } });
+  sim.generate();
+  sim.food.clear();
+  const spot = findCell(sim, inlandMild);
+  const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+  let same = 0, births = 0;
+  for (let i = 0; i < 400; i++) {
+    for (const swimmer of [true, false]) {
+      sim.creatures = [creature({ ...spot, swimmer, energy: 150, preferredTemp: temp })];
+      sim.step(0, 0);
+      births++;
+      if (sim.creatures[1].swimmer === swimmer) same++;
+    }
+  }
+  assert.ok(same / births > 0.95 && same < births, same + ' of ' + births);
+});
+
+test('a species that takes to the water is noted in the log', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  for (let i = 0; i < 20; i++) sim.creatures.push(creature({ x: spot.x + i, y: spot.y, swimmer: i < 12, energy: 100, speed: 0.01, preferredTemp: 18 }));
+  while (sim.tick < RULES.abilityReviewEvery) sim.step(0, 0);
+  assert.ok(sim.events.some((e) => e.text === 'Meadowfolk took to the water'));
 });
 
 // Leaves one carcass at `spot` by letting a creature starve there.
@@ -591,8 +610,9 @@ test('loading rejects a save from another version', () => {
 // ---------- Getting stuck ----------
 
 test('a creature gets round a wall to reach food instead of pacing in front of it', () => {
-  // A wide temperature tolerance keeps passing weather out of this test.
-  const sim = createSim({ seed: 7, params: { tempTolerance: 100 } });
+  // A wide temperature tolerance keeps passing weather out of this test, and
+  // without nightfall its sight stays the same throughout.
+  const sim = createSim({ seed: 7, params: { tempTolerance: 100, dayNight: false } });
   sim.generate();
   sim.creatures = [];
   const spot = findCell(sim, (d, temp) => d > 8 && d < 1e8 && Math.abs(temp - 18) < 4); // mid-map, clear of the edges
@@ -628,6 +648,126 @@ test('plants do not pile up where nothing eats them', () => {
   for (const bucket of sim.food.buckets) assert.ok(bucket.length <= RULES.maxFoodNearby);
   for (const f of sim.food) assert.ok(sim.waterDistance[cellIndex(f.x, f.y)] < 1e8, 'a plant grew on land cut off from water');
 });
+
+// ---------- Living world ----------
+
+test('with seeding, new plants sprout beside existing ones', () => {
+  const sim = createSim({ seed: 7, params: { plantSeeding: 1 } });
+  sim.generate();
+  sim.creatures = [];
+  sim.food.clear();
+  const spot = findCell(sim, inlandMild);
+  sim.addFood(spot.x, spot.y);
+  for (let i = 0; i < 3; i++) sim.step(2, 0);
+  assert.ok(sim.food.size > 1, 'some seedlings took');
+  for (const f of sim.food) assert.ok(Math.hypot(f.x - spot.x, f.y - spot.y) <= RULES.seedRange * 3 + 1e-9);
+});
+
+test('sickness spreads within a species, not to others, and leaves the recovered immune', () => {
+  const sim = createSim({ seed: 7, params: { maxBreedingStress: -1 } }); // nobody splits
+  sim.generate();
+  sim.food.clear();
+  const spot = findCell(sim, inlandMild);
+  const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+  const still = { speed: 0.01, energy: 900, preferredTemp: temp };
+  const patient = creature({ ...spot, ...still, sick: RULES.sickness.length });
+  const mate = creature({ x: spot.x + 4, y: spot.y, ...still });
+  const stranger = creature({ x: spot.x, y: spot.y + 4, ...still, species: 2, vision: 1 });
+  patient.vision = mate.vision = 1; // so they do not fight the stranger
+  sim.creatures = [patient, mate, stranger];
+  for (let i = 0; i < 300 && !mate.sick; i++) sim.step(0, 0);
+  assert.ok(mate.sick > 0, 'its own kind caught it');
+  assert.equal(stranger.sick || 0, 0);
+  while (patient.sick > 0) sim.step(0, 0);
+  assert.equal(patient.immune, RULES.sickness.immunity);
+  assert.ok(sim.events.length === 0 || sim.events.every((e) => e.kind !== 'sickness'), 'two sick creatures are not an outbreak');
+});
+
+test('a sick creature uses more energy', () => {
+  const used = (sick) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const c = creature({ ...spot, sick, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] });
+    sim.creatures = [c];
+    sim.step(0, 0);
+    return 60 - c.energy;
+  };
+  assert.ok(Math.abs(used(100) - used(0) - RULES.sickness.cost) < 1e-9);
+});
+
+test('a well-fed idle creature drifts toward others of its species', () => {
+  const gap = (herding) => {
+    const sim = createSim({ seed: 7, params: { herding, disease: false } });
+    sim.generate();
+    sim.creatures = [];
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const a = creature({ ...spot, heading: Math.PI, energy: 100, preferredTemp: temp });
+    const b = creature({ x: spot.x + 25, y: spot.y, heading: 0, speed: 0.01, energy: 100, preferredTemp: temp });
+    sim.creatures = [a, b];
+    for (let i = 0; i < 20; i++) sim.step(0, 0);
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  assert.ok(gap(0.5) < gap(0) - 10);
+});
+
+test('a creature far out of its climate moves on before stopping to eat', () => {
+  const ate = (migration) => {
+    const sim = createSim({ seed: 7, params: { migration, disease: false, herding: 0 } });
+    sim.generate();
+    sim.creatures = [];
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    // It wants it much warmer, which lies south; the plant is to the north.
+    sim.creatures = [creature({ ...spot, preferredTemp: temp + RULES.migrateAbove + sim.params.tempTolerance + 5, energy: 40 })];
+    sim.addFood(spot.x, spot.y - 12);
+    for (let i = 0; i < 15; i++) sim.step(0, 0);
+    return sim.food.size === 0;
+  };
+  assert.equal(ate(false), true);
+  assert.equal(ate(true), false);
+});
+
+test('swimmers are a little slower on land', () => {
+  const stepLength = (swimmer) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const c = creature({ ...spot, swimmer, strength: 1, speed: 2 });
+    sim.creatures = [c];
+    sim.step(0, 0);
+    return Math.hypot(c.x - spot.x, c.y - spot.y);
+  };
+  assert.ok(Math.abs(stepLength(true) - 2 * sim0().params.swimmerLandPace) < 1e-9);
+  assert.ok(Math.abs(stepLength(false) - 2) < 1e-9);
+});
+
+test('at night most creatures see half as far, and those with night eyes see fully', () => {
+  // Does a creature with sight 30 notice a plant 20 pixels off at this hour?
+  const notices = (tick, nightEyes, dayNight = true) => {
+    const sim = createSim({ seed: 7, params: { dayNight, disease: false } });
+    sim.generate();
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    const c = creature({ ...spot, vision: 30, nightEyes, heading: Math.PI, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] });
+    sim.creatures = [c];
+    sim.tick = tick;
+    sim.addFood(spot.x + 20, spot.y);
+    sim.step(0, 0);
+    return Math.cos(c.heading) > 0.99; // turned to face it
+  };
+  const noon = 0, midnight = RULES.dayLength / 2;
+  assert.equal(notices(noon, false), true);
+  assert.equal(notices(midnight, false), false);
+  assert.equal(notices(midnight, true), true);
+  assert.equal(notices(noon, true), false, 'night eyes see half as far at noon');
+  assert.equal(notices(midnight, false, false), true, 'with day and night off, sight never changes');
+  assert.equal(timeOfDay(noon), 'Day');
+  assert.equal(timeOfDay(midnight), 'Night');
+});
+
+const sim0 = () => createSim({ seed: 1 });
 
 // ---------- Random disasters ----------
 

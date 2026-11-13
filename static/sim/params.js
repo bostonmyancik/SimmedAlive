@@ -37,7 +37,8 @@ export const DEFAULT_PARAMS = {
   tempMutationScale: 2,    // how fast preferred temperature mutates
 
   // Swimming
-  swimmerShare: 0.2,       // chance that a creature is born able to swim
+  swimmerLandPace: 0.9,    // a swimmer's speed on land, as a share of a non-swimmer's
+  swimmerShare: 0.2,       // share of the founding creatures that can swim; their young inherit it
 
   // Random disasters
   autoDisasters: false,    // let disasters strike on their own now and then
@@ -51,6 +52,13 @@ export const DEFAULT_PARAMS = {
   evolveEvery: 2000,       // ticks between these shifts
   evolveRate: 0.15,        // share of the gap between the species and its members closed each time
   evolveStep: 0.7,         // how far (in trait distance) a species must change to reach a new stage
+
+  // Living world
+  plantSeeding: 0.25,       // share of new plants that sprout beside an existing one
+  disease: true,           // let sickness break out and spread between creatures of a species
+  herding: 0.25,           // how strongly an idle creature drifts toward others of its species (0 to 1)
+  migration: true,         // creatures well out of their climate set off toward a better one
+  dayNight: true,          // days and nights: sight is short at night except for night eyes
 
   // Abilities
   abilities: true,         // let creatures gain special abilities
@@ -113,6 +121,9 @@ export const RULES = {
   // Swimming. Swimmers cross water; everyone else has to go around.
   swimSpeedFactor: 0.6,        // speed in water, as a share of speed on land
   swimCost: 0.05,              // extra energy per tick spent in water
+  swimFlip: 0.02,              // chance a newborn can swim when its parent cannot, or the reverse
+  swimSpreadAt: 0.4,           // share of swimmers before a species counts as swimming...
+  swimFadeAt: 0.1,             // ...and the share below which it no longer does
 
   // Getting around obstacles. A blocked creature slides along the obstacle and
   // then keeps to that course for a while instead of turning straight back.
@@ -140,6 +151,39 @@ export const RULES = {
   },
   abilityReviewEvery: 500,     // ticks between checks on which abilities each species has
   effectTicks: 12,             // how long the flash of an ability stays on the map
+
+  // Day and night. Most creatures see half as far at midnight; a creature
+  // with night eyes sees fully at night but less far by day.
+  dayLength: 1200,             // ticks from one noon to the next
+  nightSight: 0.5,             // sight at midnight without night eyes, as a share of full sight
+  nightEyesDaySight: 0.5,      // sight at noon with night eyes, so on average neither kind sees further
+  nightEyesFlip: 0.005,        // chance a newborn differs from its parent in having night eyes
+
+  // Plants spreading
+  seedRange: 16,               // how far from its parent plant a seedling sprouts, in pixels
+
+  // Sickness. It breaks out now and then and passes between creatures of a
+  // species that come close, so crowded species suffer most.
+  sickness: {
+    outbreakChance: 0.000002,  // chance per tick that a healthy creature falls sick by itself
+    spreadChance: 0.02,        // chance per tick of passing it to each healthy member nearby
+    contactRange: 10,          // pixels
+    length: 400,               // ticks a creature stays sick
+    cost: 0.15,                // extra energy per tick while sick
+    immunity: 4000,            // ticks a creature cannot catch it again after recovering
+    noticeAt: 15,              // sick members before the log notes an outbreak
+  },
+  sicknessReviewEvery: 100,    // ticks between checks for outbreaks starting or passing
+
+  // Herding: an idle creature drifts toward the nearest member of its species
+  // it can see, unless it is already this close.
+  herdSpacing: 12,
+  herdWhenFed: 0.6,            // ...and only once its energy is this share of what it needs to split
+
+  // Migration: a creature this many degrees beyond what it tolerates looks
+  // further afield for a better climate and goes there before feeding.
+  migrateAbove: 3,
+  migrateProbe: 90,            // pixels north and south it looks
 
   // World tools and disasters
   tempOffsetLimit: 20,         // most a brush can warm or cool a spot, in degrees

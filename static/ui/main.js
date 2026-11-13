@@ -3,12 +3,12 @@
 
 import { createSim } from '../sim/sim.js';
 import { randomSeed } from '../sim/rng.js';
-import { RULES, SPECIES } from '../sim/params.js';
+import { RULES, SPECIES, DEFAULT_PARAMS } from '../sim/params.js';
 import { normalizeFounders, colorForSpecies } from '../sim/species.js';
 import { ABILITY_NAMES, ABILITY_HINTS } from '../sim/abilities.js';
 import { breedEnergy } from '../sim/creatures.js';
 import { TOAST_GROUPS, tidyToastSettings, wantsToast, createToasts } from './toasts.js';
-import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
+import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, timeOfDay, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
 import { AUTOSAVE_NAME, listSaves, getSave, getAutosave, putSave, deleteSave } from './saves.js';
@@ -181,6 +181,8 @@ function refreshSpecies() {
       '<dt>Diet</dt><dd>' + dietWords(st.diet) + '</dd>' +
       '<dt>Stage</dt><dd>' + sp.stage + '</dd>' +
       '<dt>Can swim</dt><dd>' + Math.round(st.swimmers * 100) + '%</dd>' +
+      (sim.params.dayNight ? '<dt>Night eyes</dt><dd>' + Math.round(st.nightEyes * 100) + '%</dd>' : '') +
+      (st.sick > 0 ? '<dt>Sick</dt><dd>' + Math.max(1, Math.round(st.sick * 100)) + '%</dd>' : '') +
       abilityFacts(st.abilities) +
       '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
       '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
@@ -227,7 +229,7 @@ function refreshInspector() {
   const stressed = Math.abs(gap) > sim.params.tempTolerance;
   let status;
   if (selectedDiedAt !== null) status = 'Died at tick ' + fmt(selectedDiedAt);
-  else status = [c.frozen > 0 ? 'Frozen' : null, c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
+  else status = [c.frozen > 0 ? 'Frozen' : null, c.sick > 0 ? 'Sick' : null, c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
     .filter(Boolean).join(' · ') || 'Comfortable';
 
   $('inspTitle').innerHTML = dot(sp.color) + sp.name;
@@ -242,6 +244,7 @@ function refreshInspector() {
   $('inspStrength').textContent = c.strength.toFixed(2);
   $('inspDiet').textContent = dietWords(c.diet);
   $('inspSwims').textContent = c.swimmer ? 'Yes' : 'No';
+  $('inspNight').textContent = c.nightEyes ? 'Yes: sees well at night, less by day' : 'No';
   $('inspAbility').textContent = c.ability ? ABILITY_NAMES[c.ability] + ': ' + ABILITY_HINTS[c.ability].toLowerCase() : 'None';
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
@@ -306,7 +309,8 @@ function drawCharts() {
 function refreshClock() {
   const { year, season } = seasonAt(sim.tick);
   $('clock').textContent = (inPast() ? 'Viewing tick ' + fmt(sim.tick) + ' of ' + fmt(latestTick) : 'Tick ' + fmt(sim.tick))
-    + ' · Year ' + year + ' · ' + season + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
+    + ' · Year ' + year + ' · ' + season + (sim.params.dayNight ? ' · ' + timeOfDay(sim.tick) : '')
+    + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
   $('toNow').hidden = !inPast();
   $('pause').textContent = !paused ? 'Pause' : inPast() ? 'Resume from here' : 'Resume';
 }
@@ -333,6 +337,11 @@ function refreshMarkers() {
 function refreshWorldSettings() {
   $('autoDisasters').checked = !!sim.params.autoDisasters;
   $('abilitiesOn').checked = !!sim.params.abilities;
+  $('dayNightOn').checked = !!sim.params.dayNight;
+  $('diseaseOn').checked = !!sim.params.disease;
+  $('herdingOn').checked = sim.params.herding > 0;
+  $('migrationOn').checked = !!sim.params.migration;
+  $('seedingOn').checked = sim.params.plantSeeding > 0;
   if (document.activeElement === $('swimShare')) return;
   const percent = Math.round(sim.params.swimmerShare * 100);
   $('swimShare').value = percent;
@@ -1033,6 +1042,19 @@ $('abilitiesOn').onchange = (e) => {
   sim.params.abilities = e.target.checked;
   worldEdited = true;
 };
+// The living-world switches. Herding and seeding are strengths, on or off here.
+const worldSwitch = (id, apply) => {
+  $(id).onchange = (e) => {
+    apply(e.target.checked);
+    worldEdited = true;
+    refreshClock();
+  };
+};
+worldSwitch('dayNightOn', (on) => { sim.params.dayNight = on; });
+worldSwitch('diseaseOn', (on) => { sim.params.disease = on; });
+worldSwitch('herdingOn', (on) => { sim.params.herding = on ? DEFAULT_PARAMS.herding : 0; });
+worldSwitch('migrationOn', (on) => { sim.params.migration = on; });
+worldSwitch('seedingOn', (on) => { sim.params.plantSeeding = on ? DEFAULT_PARAMS.plantSeeding : 0; });
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
 const disaster = (strike) => () => { branchHere(); strike(); worldWasEdited(); refreshAll(); };
 $('toNow').onclick = () => goTo(latestTick, true);

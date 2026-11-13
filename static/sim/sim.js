@@ -10,7 +10,7 @@ import { pack, unpack } from './pack.js';
 import { ABILITIES, ABILITY_NAMES, inheritAbility, abilityPower } from './abilities.js';
 import {
   GRID_W, GRID_H, CELL, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN,
-  cellIndex, wrapDistance, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
+  cellIndex, wrapDistance, daylightAt, generateLakes, generateMountains, classifyLand, computeWaterDistance, updateTemperature,
 } from './world.js';
 
 const BUCKET_SIZE = 40; // pixels; roughly a typical vision radius
@@ -34,7 +34,7 @@ const SAVE_VERSION = 1;
 const CREATURE_FIELDS = [
   'id', 'parentId', 'species', 'x', 'y', 'heading', 'energy', 'hydration', 'thirsty', 'age',
   'bornTick', 'generation', 'offspring', ...TRAITS, 'swimmer', 'detour', 'blocked', 'slide',
-  'ability', 'cooldown', 'frozen', 'dashing',
+  'ability', 'cooldown', 'frozen', 'dashing', 'sick', 'immune', 'nightEyes',
 ];
 
 // How the event log describes a species changing, trait by trait: [more, less].
@@ -218,6 +218,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       stage: 1,
       stageOrigin: traitsOf(founder),
       abilities: [],
+      swims: P.swimmerShare >= RULES.swimSpreadAt,
+      nocturnal: false,
       lastTrendCount: founder.startCount,
     }));
 
@@ -284,9 +286,18 @@ export function createSim({ seed = 1, params = {} } = {}) {
   // Plants sprout at random spots, subject to how fertile the land is there.
   function growFood(foodRate) {
     let budget = foodRate * P.foodGrowth * (inDrought() ? RULES.droughtFoodFactor : 1);
+    const plants = P.plantSeeding > 0 ? [...sim.food] : [];
     while (budget > 0) {
       if (random() < budget && sim.food.size < RULES.maxFood) {
-        const x = random() * WIDTH, y = random() * HEIGHT;
+        let x = random() * WIDTH, y = random() * HEIGHT;
+        // Some seedlings sprout beside a plant that is already growing, so
+        // plants spread out from where they are and grazed-bare land is slow to recover.
+        if (plants.length && random() < P.plantSeeding) {
+          const parent = plants[Math.floor(random() * plants.length)];
+          const angle = random() * 6.283, distance = random() * RULES.seedRange;
+          x = (parent.x + Math.cos(angle) * distance + WIDTH) % WIDTH;
+          y = clamp(parent.y + Math.sin(angle) * distance, 0, HEIGHT - 1);
+        }
         // A patch that is already crowded grows no more. This keeps plants
         // nobody can reach from piling up and using the whole world's allowance.
         if (random() < fertility(cellIndex(x, y)) && sim.food.bucketAt(x, y).length < RULES.maxFoodNearby) addFood(x, y);
@@ -505,6 +516,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.cooldown = c.cooldown || 0;
       c.frozen = c.frozen || 0;
       c.dashing = c.dashing || 0;
+      c.sick = c.sick || 0; // saves from before sickness existed
+      c.immune = c.immune || 0;
+      c.nightEyes = !!c.nightEyes; // saves from before day and night
       return c;
     });
     sim.projectiles = (data.projectiles || []).map((p) => ({ ...p }));
@@ -575,6 +589,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       stageOrigin: { ...origin },
       // An ability its parent species already had comes with it.
       abilities: child.ability && home.abilities.includes(child.ability) ? [child.ability] : [],
+      swims: home.swims,
+      nocturnal: home.nocturnal,
       lastTrendCount: 0,
     });
     livingSpecies++;
@@ -655,11 +671,36 @@ export function createSim({ seed = 1, params = {} } = {}) {
   }
 
   // Notes when an ability has spread through most of a species, or died out of it.
+  // Also notes when a species takes to the water, or leaves it.
   function reviewAbilities() {
     const held = sim.species.map(() => ({}));
-    for (const c of sim.creatures) if (c.ability) held[c.species][c.ability] = (held[c.species][c.ability] || 0) + 1;
+    const swimmers = sim.species.map(() => 0);
+    const nightEyed = sim.species.map(() => 0);
+    for (const c of sim.creatures) {
+      if (c.ability) held[c.species][c.ability] = (held[c.species][c.ability] || 0) + 1;
+      if (c.swimmer) swimmers[c.species]++;
+      if (c.nightEyes) nightEyed[c.species]++;
+    }
     for (const sp of sim.species) {
       if (!sp.established || sp.count < RULES.establishedAt) continue;
+      const nightShare = nightEyed[sp.id] / sp.count;
+      if (sp.nocturnal === undefined) sp.nocturnal = nightShare >= RULES.swimSpreadAt; // older saves
+      if (!sp.nocturnal && nightShare >= RULES.swimSpreadAt) {
+        sp.nocturnal = true;
+        logEvent('ability', sp.name + ' took to the night', sp.id);
+      } else if (sp.nocturnal && nightShare < RULES.swimFadeAt) {
+        sp.nocturnal = false;
+        logEvent('ability', sp.name + ' went back to the daytime', sp.id);
+      }
+      const swimShare = swimmers[sp.id] / sp.count;
+      if (sp.swims === undefined) sp.swims = swimShare >= RULES.swimSpreadAt; // older saves
+      if (!sp.swims && swimShare >= RULES.swimSpreadAt) {
+        sp.swims = true;
+        logEvent('ability', sp.name + ' took to the water', sp.id);
+      } else if (sp.swims && swimShare < RULES.swimFadeAt) {
+        sp.swims = false;
+        logEvent('ability', sp.name + ' gave up swimming', sp.id);
+      }
       for (const name of ABILITIES) {
         const share = (held[sp.id][name] || 0) / sp.count;
         const has = sp.abilities.includes(name);
@@ -780,10 +821,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (bestX || bestY) c.heading = Math.atan2(bestY, bestX);
   }
 
-  // Points a creature toward whichever nearby spot is closest to its preferred temperature.
-  function headTowardComfort(c) {
+  // Points a creature toward whichever nearby spot is closest to its preferred
+  // temperature. Migrating, it also looks much further north and south.
+  function headTowardComfort(c, migrating = false) {
     let best = 1e9;
-    for (const [ax, ay] of TEMP_PROBES) {
+    const far = RULES.migrateProbe;
+    for (const [ax, ay] of migrating ? [...TEMP_PROBES, [0, far], [0, -far]] : TEMP_PROBES) {
       const probe = cellIndex((c.x + ax + WIDTH) % WIDTH, clamp(c.y + ay, 0, HEIGHT - 1));
       const gap = Math.abs(sim.temperature[probe] - c.preferredTemp);
       if (gap < best) {
@@ -791,6 +834,18 @@ export function createSim({ seed = 1, params = {} } = {}) {
         c.heading = Math.atan2(ay, ax);
       }
     }
+  }
+
+  // Turns an idle creature part of the way toward the nearest member of its
+  // species it can see, unless they are already close, so herds and packs form.
+  function herd(c, visionSq) {
+    const spacingSq = RULES.herdSpacing * RULES.herdSpacing;
+    const mate = creatureGrid.nearest(c.x, c.y, visionSq, (o) => o.species === c.species && o !== c
+      && (o.x - c.x) * (o.x - c.x) + (o.y - c.y) * (o.y - c.y) > spacingSq);
+    if (!mate) return;
+    const toward = Math.atan2(mate.y - c.y, mate.x - c.x);
+    const turn = Math.atan2(Math.sin(toward - c.heading), Math.cos(toward - c.heading));
+    c.heading += turn * P.herding;
   }
 
   const onDryLand = (item) => !item.wet;
@@ -841,12 +896,53 @@ export function createSim({ seed = 1, params = {} } = {}) {
   // in-between diets digest both kinds less well, so specialists can compete.
   const digests = (share) => share ** P.dietSpecialization;
 
+  // A sick creature passes it on to healthy members of its species close by,
+  // and gets better after a while, then cannot catch it again for a time.
+  // Now and then a healthy one falls sick by itself.
+  function sickness(c) {
+    const rule = RULES.sickness;
+    if (c.immune > 0) c.immune--;
+    if (c.sick > 0) {
+      creatureGrid.forEachNear(c.x, c.y, rule.contactRange, (o) => {
+        if (o.species === c.species && !o.sick && !o.immune && o.energy > 0 && random() < rule.spreadChance) o.sick = rule.length;
+      });
+      if (--c.sick === 0) c.immune = rule.immunity;
+    } else if (!c.immune && random() < rule.outbreakChance) {
+      c.sick = rule.length;
+    }
+  }
+
+  // Notes when sickness takes hold in a species, and when it has passed.
+  function reviewSickness() {
+    const sick = sim.species.map(() => 0);
+    for (const c of sim.creatures) if (c.sick > 0) sick[c.species]++;
+    for (const sp of sim.species) {
+      if (!sp.outbreak && sp.established && sick[sp.id] >= RULES.sickness.noticeAt) {
+        sp.outbreak = true;
+        logEvent('sickness', 'A sickness is spreading among ' + sp.name, sp.id);
+      } else if (sp.outbreak && sick[sp.id] === 0) {
+        sp.outbreak = false;
+        if (sp.count > 0) logEvent('sickness', 'The sickness among ' + sp.name + ' has passed', sp.id);
+      }
+    }
+  }
+
+  // How far a creature sees right now, as a share of its full sight.
+  function sightFactor(c) {
+    if (!P.dayNight) return 1;
+    const light = daylightAt(sim.tick);
+    return c.nightEyes
+      ? 1 - (1 - RULES.nightEyesDaySight) * light
+      : 1 - (1 - RULES.nightSight) * (1 - light);
+  }
+
   // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost
   // energy, and so does having an ability. Water runs low faster in the heat.
   function payUpkeep(c, stress, swimming, temp) {
     c.energy -= 0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
       + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress
-      + (swimming ? RULES.swimCost : 0) + (c.ability ? RULES.abilityUpkeep : 0);
+      + (swimming ? RULES.swimCost : 0) + (c.ability ? RULES.abilityUpkeep : 0)
+      + (c.sick > 0 ? RULES.sickness.cost : 0);
     c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12)
       * (inDrought() ? RULES.droughtThirstFactor : 1);
     c.age++;
@@ -859,6 +955,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     const stress = Math.max(0, Math.abs(temp - c.preferredTemp) - P.tempTolerance);
     const swimming = sim.water[cell] === 1;
     if (c.cooldown > 0) c.cooldown--;
+    if (P.disease) sickness(c);
 
     // Frozen (or held after a pull): it can do nothing but wait it out.
     if (c.frozen > 0) {
@@ -868,7 +965,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }
 
     // What can it see? (Sight does not cross the east-west wrap.)
-    const visionSq = c.vision * c.vision;
+    const sight = c.vision * sightFactor(c);
+    const visionSq = sight * sight;
     const distSqTo = (o) => (o.x - c.x) * (o.x - c.x) + (o.y - c.y) * (o.y - c.y);
     const enemy = creatureGrid.nearest(c.x, c.y, visionSq,
       (o) => o.energy > 0 && isHostile(c.species, o.species) && !hiddenFrom(o, distSqTo(o)));
@@ -903,7 +1001,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     const course = c.heading;
     // A heavier body is slower: above strength 1 each point costs a share of top speed.
     const pace = c.speed / (1 + P.sizeSlowdown * Math.max(0, c.strength - 1));
-    let move = pace * (swimming ? RULES.swimSpeedFactor : 1);
+    let move = pace * (swimming ? RULES.swimSpeedFactor : c.swimmer ? P.swimmerLandPace : 1);
     const mustFlee = enemy
       && enemy.strength > c.strength * RULES.fleeStrengthRatio
       && enemyDistSq < P.fleeDistance * P.fleeDistance;
@@ -930,6 +1028,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       } else {
         headTowardWater(c, cell);
       }
+    } else if (P.migration && stress > RULES.migrateAbove && !canHunt) {
+      headTowardComfort(c, true); // far out of its climate: move on before stopping to feed
     } else if (canHunt) {
       c.heading = Math.atan2(enemy.y - c.y, enemy.x - c.x);
     } else if (meal) {
@@ -952,6 +1052,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
       headTowardComfort(c);
     } else {
       c.heading += (random() - 0.5) * 0.5; // wander
+      // Only a well-fed creature keeps to its herd; a hungry one roams for food.
+      // (Not on a mountain, where it may be stranded and should keep moving.)
+      if (P.herding > 0 && c.energy > breedEnergy(c) * RULES.herdWhenFed && sim.terrain[cell] !== MOUNTAIN) herd(c, visionSq);
     }
 
     if (c.detour > 0) {
@@ -1051,17 +1154,20 @@ export function createSim({ seed = 1, params = {} } = {}) {
     countSpecies();
     if (sim.tick % P.evolveEvery === 0) evolveSpecies();
     if (sim.tick % RULES.abilityReviewEvery === 0) reviewAbilities();
+    if (sim.tick % RULES.sicknessReviewEvery === 0) reviewSickness();
     sim.effects = sim.effects.filter((e) => sim.tick - e.tick < RULES.effectTicks);
   }
 
   // Average traits, share of swimmers and of each ability, and highest generation for every species, indexed like
   // sim.species. (Head counts and kills are on the species records.)
   function stats() {
-    const out = sim.species.map(() => ({ speed: 0, vision: 0, strength: 0, preferredTemp: 0, diet: 0, swimmers: 0, maxGeneration: 0, abilities: {} }));
+    const out = sim.species.map(() => ({ speed: 0, vision: 0, strength: 0, preferredTemp: 0, diet: 0, swimmers: 0, nightEyes: 0, sick: 0, maxGeneration: 0, abilities: {} }));
     for (const c of sim.creatures) {
       const s = out[c.species];
       for (const trait of TRAITS) s[trait] += c[trait];
       if (c.swimmer) s.swimmers++;
+      if (c.nightEyes) s.nightEyes++;
+      if (c.sick > 0) s.sick++;
       if (c.ability) s.abilities[c.ability] = (s.abilities[c.ability] || 0) + 1;
       if (c.generation > s.maxGeneration) s.maxGeneration = c.generation;
     }
@@ -1069,6 +1175,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       const n = sim.species[id].count || 1;
       for (const trait of TRAITS) s[trait] /= n;
       s.swimmers /= n; // the share of the species that can swim
+      s.nightEyes /= n; // ...that has night eyes
+      s.sick /= n;      // ...and that is sick
       for (const name in s.abilities) s.abilities[name] /= n; // the share with each ability
     });
     return out;

@@ -127,6 +127,20 @@ const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
 const YEAR_TICKS = 2 * Math.PI * RULES.seasonLength;
 
 // The year (starting at 1) and season name for a tick. Summer is the warm peak.
+// How light it is: 1 at noon, 0 at midnight. Ticks start at noon.
+export function daylightAt(tick) {
+  return 0.5 + 0.5 * Math.cos((2 * Math.PI * tick) / RULES.dayLength);
+}
+
+// 'Day', 'Dusk', 'Night' or 'Dawn', for the bottom bar.
+export function timeOfDay(tick) {
+  const phase = (tick % RULES.dayLength) / RULES.dayLength; // 0 is noon, 0.5 midnight
+  if (phase < 0.2 || phase >= 0.8) return 'Day';
+  if (phase < 0.3) return 'Dusk';
+  if (phase < 0.7) return 'Night';
+  return 'Dawn';
+}
+
 export function seasonAt(tick) {
   const phase = (tick / RULES.seasonLength) % (2 * Math.PI);
   const quarter = Math.floor(((phase + Math.PI / 4) % (2 * Math.PI)) / (Math.PI / 2));

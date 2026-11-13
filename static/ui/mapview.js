@@ -1,7 +1,7 @@
 // Draws the world onto the map canvas: terrain, the chosen layer, water,
 // plants, carcasses and creatures.
 
-import { GRID_W, GRID_H, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN } from '../sim/world.js';
+import { GRID_W, GRID_H, WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, daylightAt } from '../sim/world.js';
 import { RULES } from '../sim/params.js';
 
 // Territory is counted on a coarser grid so neighbours blend into regions.
@@ -239,6 +239,15 @@ export function createMapView(canvas, sim, camera) {
     else if (view.layer !== 'none') ctx.drawImage(overlay.canvas, 0, 0, WIDTH, HEIGHT);
     ctx.drawImage(water.canvas, 0, 0, WIDTH, HEIGHT);
 
+    // Night darkens the land and water, but not what lives on it.
+    if (sim.params.dayNight) {
+      const dark = (1 - daylightAt(sim.tick)) * 0.45;
+      if (dark > 0.01) {
+        ctx.fillStyle = 'rgba(6, 10, 38, ' + dark.toFixed(3) + ')';
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      }
+    }
+
     // Plants are bright dots.
     ctx.fillStyle = theme.plant;
     ctx.beginPath();
@@ -296,6 +305,15 @@ export function createMapView(canvas, sim, camera) {
         ctx.strokeStyle = '#e8f6ff';
         ctx.lineWidth = 1.5;
         ctx.stroke();
+      }
+      if (c.sick > 0) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 1.5, 0, 6.29);
+        ctx.setLineDash([2, 2]);
+        ctx.strokeStyle = '#9bd63a';
+        ctx.lineWidth = 1.3;
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
       if (c.thirsty) {
         ctx.beginPath();

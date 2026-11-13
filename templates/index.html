@@ -180,7 +180,7 @@
   :is(#events li, .toast).cold .pip { background: #378add; }
   :is(#events li, .toast).species .pip, :is(#events li, .toast).boom .pip { background: #4f9a3a; }
   :is(#events li, .toast).crash .pip, :is(#events li, .toast).drought .pip { background: #d08a1c; }
-  :is(#events li, .toast).plague .pip { background: #8e5bbf; }
+  :is(#events li, .toast).plague .pip, :is(#events li, .toast).sickness .pip { background: #8e5bbf; }
   :is(#events li, .toast).meteor .pip { background: #e24b4a; }
   :is(#events li, .toast).evolve .pip, :is(#events li, .toast).ability .pip { background: #2f8fd0; }
   :is(#events li, .toast).mutation .pip { background: #8fb8d8; }
@@ -262,7 +262,7 @@
   .marker.cold::before { background: #378add; }
   .marker.species::before, .marker.boom::before { background: #4f9a3a; }
   .marker.crash::before, .marker.drought::before { background: #d08a1c; }
-  .marker.plague::before { background: #8e5bbf; }
+  .marker.plague::before, .marker.sickness::before { background: #8e5bbf; }
   .marker.meteor::before { background: #e24b4a; }
   .marker.evolve::before, .marker.ability::before { background: #2f8fd0; }
   .marker.mutation::before { background: #8fb8d8; }
@@ -375,7 +375,7 @@
     <div class="panel" id="tab-species" role="tabpanel">
       <div class="cardsbar"><span id="speciesSummary"></span><button id="collapseAll">Collapse all</button></div>
       <div id="cards"></div>
-      <p class="hint">Bigger body means stronger. A blue ring means thirsty, a white ring frozen. A dot in the middle marks a special ability. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
+      <p class="hint">Bigger body means stronger. A blue ring means thirsty, a white ring frozen, a dashed green ring sick. A dot in the middle marks a special ability. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
       <p class="hint" id="extinctList"></p>
     </div>
 
@@ -395,6 +395,7 @@
           <dt>Strength</dt><dd id="inspStrength"></dd>
           <dt>Diet</dt><dd id="inspDiet"></dd>
           <dt>Can swim</dt><dd id="inspSwims"></dd>
+          <dt>Night eyes</dt><dd id="inspNight"></dd>
           <dt>Ability</dt><dd id="inspAbility"></dd>
           <dt>Prefers</dt><dd id="inspPrefers"></dd>
           <dt>Temperature here</dt><dd id="inspHere"></dd>
@@ -442,10 +443,21 @@
       <h2>Environment</h2>
       <div class="field"><div class="row"><label for="fRate">Food supply</label><output id="fOut">1.0</output></div><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"></div>
       <div class="field"><div class="row"><label for="mut">Mutation rate</label><output id="mutOut">0.4</output></div><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"></div>
-      <div class="field"><div class="row"><label for="swimShare">Born able to swim</label><output id="swimOut">20%</output></div><input type="range" id="swimShare" min="0" max="100" step="5" value="20"></div>
-      <p class="hint">Swimmers cross water and reach the plants growing in it. Everyone else has to go around.</p>
+      <div class="field"><div class="row"><label for="swimShare">Founders able to swim</label><output id="swimOut">20%</output></div><input type="range" id="swimShare" min="0" max="100" step="5" value="20"></div>
+      <p class="hint">Swimmers cross water and reach the plants growing in it. Everyone else has to go around. Young inherit swimming from their parent (1 in 50 differs), so a species can take to the water or give it up. This share applies to the next new world.</p>
       <label class="check"><input type="checkbox" id="abilitiesOn" checked> Special abilities</label>
       <p class="hint">Now and then a newborn gains an ability, which its offspring inherit. Weaker creatures gain camouflage or a dash; stronger ones gain spit, freeze or a pull that drags weaker enemies in. Abilities are stronger in stronger creatures and turn up more often as a species evolves.</p>
+      <h2>Living world</h2>
+      <label class="check"><input type="checkbox" id="dayNightOn" checked> Day and night</label>
+      <p class="hint">Most creatures see half as far at midnight. A few are born with night eyes, which their young inherit: they see fully at night but half as far at noon.</p>
+      <label class="check"><input type="checkbox" id="diseaseOn" checked> Sickness</label>
+      <p class="hint">Now and then a creature falls sick and passes it to its own kind nearby, so crowded species suffer most. Sick creatures use more energy and have a dashed green ring; once better they cannot catch it again for a while.</p>
+      <label class="check"><input type="checkbox" id="herdingOn" checked> Herds and packs</label>
+      <p class="hint">Well-fed creatures with nothing to do keep near others of their kind, which then fight off attackers together.</p>
+      <label class="check"><input type="checkbox" id="migrationOn" checked> Migration</label>
+      <p class="hint">A creature far out of its climate sets off north or south for a better one before stopping to feed.</p>
+      <label class="check"><input type="checkbox" id="seedingOn" checked> Spreading plants</label>
+      <p class="hint">A quarter of new plants sprout beside existing ones, so plants spread out in patches and grazed-bare land is slow to grow back.</p>
       <h2>Notifications</h2>
       <label class="check"><input type="checkbox" id="toastsOn" checked> Pop up events as they happen</label>
       <div class="checks" id="toastGroups" role="group" aria-label="Events to pop up"></div>
