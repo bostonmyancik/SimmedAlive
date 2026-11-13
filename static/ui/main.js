@@ -7,6 +7,7 @@ import { RULES, SPECIES } from '../sim/params.js';
 import { normalizeFounders, colorForSpecies } from '../sim/species.js';
 import { ABILITY_NAMES, ABILITY_HINTS } from '../sim/abilities.js';
 import { breedEnergy } from '../sim/creatures.js';
+import { TOAST_GROUPS, tidyToastSettings, wantsToast, createToasts } from './toasts.js';
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
@@ -89,11 +90,34 @@ function dietWords(diet) {
 // a card's header is never lost to a redraw.
 const cards = new Map(); // species id -> { root, count, share, facts }
 let allCollapsed = readPreference('lifesim.cardsCollapsed') === 'yes';
+
+// Pop-up alerts. The settings are this browser's own, not part of the world.
+let toastSettings = tidyToastSettings(readJsonPreference('lifesim.toasts'));
+let pendingToasts = [];    // events from this frame's ticks, not yet announced
+const toasts = createToasts($('toasts'), () => showTab('events'));
 const flipped = new Set(); // species whose card differs from the "all" setting
 const isCollapsed = (id) => allCollapsed !== flipped.has(id);
 
 function readPreference(key) {
   try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function readJsonPreference(key) {
+  try { return JSON.parse(readPreference(key)); } catch { return null; }
+}
+
+// The Notifications part of Settings: the main switch and a box per group of events.
+function renderToastSettings() {
+  $('toastsOn').checked = toastSettings.enabled;
+  $('toastGroups').classList.toggle('off', !toastSettings.enabled);
+  $('toastGroups').innerHTML = TOAST_GROUPS.map((group) =>
+    '<label class="check"><input type="checkbox" data-group="' + group.key + '"' +
+    (toastSettings.groups[group.key] ? ' checked' : '') + (toastSettings.enabled ? '' : ' disabled') + '> ' + group.label + '</label>').join('');
+}
+
+function saveToastSettings() {
+  try { localStorage.setItem('lifesim.toasts', JSON.stringify(toastSettings)); } catch { /* not remembered */ }
+  renderToastSettings();
 }
 
 function showCollapsed(id) {
@@ -401,6 +425,7 @@ function newWorld(seed) {
 // `savedHistory` is the chart history that came with a loaded world.
 function showWorld(savedHistory = []) {
   history = savedHistory;
+  toasts.clear(); // they were about the world that has gone
   worldEdited = true;
   checkpoints = [];
   latestTick = sim.tick;
@@ -595,14 +620,24 @@ function goTo(target, exact) {
   refreshAll();
 }
 
+// Pops up the events from `newEvents` that the user wants to hear about.
+function announce(newEvents) {
+  const wanted = newEvents.filter((e) => wantsToast(toastSettings, e));
+  toasts.show(wanted, (at) => 'Tick ' + fmt(at) + ' · Year ' + seasonAt(at).year);
+}
+
 function tick() {
   branchHere();
+  const lastEvent = sim.events[sim.events.length - 1];
   for (const c of sim.creatures) {
     c.prevX = c.x;
     c.prevY = c.y;
   }
   sim.step(+$('fRate').value, +$('mut').value);
   latestTick = sim.tick;
+  // New events are the ones after the last one there before this tick.
+  const from = lastEvent ? sim.events.lastIndexOf(lastEvent) + 1 : 0;
+  for (let i = from; i < sim.events.length; i++) pendingToasts.push(sim.events[i]);
   if (sim.tick % SAMPLE_EVERY === 0) sample();
   if (sim.tick % CHECKPOINT_EVERY === 0) checkpoint();
 }
@@ -616,6 +651,10 @@ function frame() {
       tick();
       debt -= 1;
       ran = true;
+    }
+    if (pendingToasts.length) {
+      announce(pendingToasts);
+      pendingToasts = [];
     }
     if (ran && ++frameCount % REFRESH_EVERY === 0) {
       map.paintLayer();
@@ -978,6 +1017,18 @@ $('autoDisasters').onchange = (e) => {
   sim.params.autoDisasters = e.target.checked;
   worldEdited = true;
 };
+$('toastsOn').onchange = (e) => {
+  toastSettings.enabled = e.target.checked;
+  if (!toastSettings.enabled) toasts.clear();
+  saveToastSettings();
+};
+$('toastGroups').onchange = (e) => {
+  const key = e.target.dataset.group;
+  if (!key) return;
+  toastSettings.groups[key] = e.target.checked;
+  saveToastSettings();
+};
+renderToastSettings();
 $('abilitiesOn').onchange = (e) => {
   sim.params.abilities = e.target.checked;
   worldEdited = true;
