@@ -65,6 +65,7 @@
   .toolopts[hidden] { display: none; }
   .kinds { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
   .kinds[hidden], .size[hidden] { display: none; }
+  .size.fill { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
   .kinds button { padding: 3px 9px; font-size: 12px; border-radius: 7px; color: var(--text-secondary); }
   .kinds button[aria-pressed=true] { background: var(--surface); color: var(--text); border-color: var(--accent); }
   .size { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -100,7 +101,7 @@
   .handle { display: none; }
   .tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
   .tabs button {
-    flex: 1; border: 0; border-radius: 0; padding: 11px 2px 9px; font-size: 13px; color: var(--text-secondary);
+    flex: 1; border: 0; border-radius: 0; padding: 11px 1px 9px; font-size: 12px; color: var(--text-secondary);
     border-bottom: 2px solid transparent;
   }
   .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
@@ -152,7 +153,15 @@
   #saves .meta { font-size: 12px; color: var(--text-muted); }
   #saves button { padding: 4px 10px; font-size: 12px; flex: none; }
   #saves button.sure { border-color: #e24b4a; color: #e24b4a; }
-  #events { list-style: none; margin: 0; padding: 0; }
+  #events, .bio, .scenarios { list-style: none; margin: 0; padding: 0; }
+  .scenarios li { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .scenarios button { flex: none; min-width: 128px; text-align: left; }
+  .scenarios span { font-size: 12px; color: var(--text-secondary); }
+  .bio { margin-top: 8px; }
+  .bio li { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .bio .when { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 62px; }
+  .records dd { text-align: right; }
+  .records .who { display: block; font-size: 12px; color: var(--text-muted); }
   #events li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
   #events .when { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 62px; }
   #events .pip, .toast .pip { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--text); }
@@ -180,7 +189,7 @@
   :is(#events li, .toast).cold .pip { background: #378add; }
   :is(#events li, .toast).species .pip, :is(#events li, .toast).boom .pip { background: #4f9a3a; }
   :is(#events li, .toast).crash .pip, :is(#events li, .toast).drought .pip { background: #d08a1c; }
-  :is(#events li, .toast).plague .pip { background: #8e5bbf; }
+  :is(#events li, .toast).plague .pip, :is(#events li, .toast).sickness .pip { background: #8e5bbf; }
   :is(#events li, .toast).meteor .pip { background: #e24b4a; }
   :is(#events li, .toast).evolve .pip, :is(#events li, .toast).ability .pip { background: #2f8fd0; }
   :is(#events li, .toast).mutation .pip { background: #8fb8d8; }
@@ -262,7 +271,7 @@
   .marker.cold::before { background: #378add; }
   .marker.species::before, .marker.boom::before { background: #4f9a3a; }
   .marker.crash::before, .marker.drought::before { background: #d08a1c; }
-  .marker.plague::before { background: #8e5bbf; }
+  .marker.plague::before, .marker.sickness::before { background: #8e5bbf; }
   .marker.meteor::before { background: #e24b4a; }
   .marker.evolve::before, .marker.ability::before { background: #2f8fd0; }
   .marker.mutation::before { background: #8fb8d8; }
@@ -342,7 +351,8 @@
         <button data-kind="desert" aria-pressed="false">Desert</button>
         <button data-kind="mountain" aria-pressed="false">Mountain</button>
       </div>
-      <label class="size" id="sizeRow">Brush size <input type="range" id="brushSize" min="10" max="90" step="5" value="30"></label>
+      <label class="size fill" id="fillRow"><input type="checkbox" id="fillMode"> Fill the whole area I click</label>
+      <label class="size" id="sizeRow">Brush size <input type="range" id="brushSize" min="10" max="240" step="5" value="30"></label>
       <div class="tip" id="toolTip"></div>
     </div>
     <div class="float legend" id="legend"></div>
@@ -369,13 +379,14 @@
       <button role="tab" data-tab="inspector" aria-selected="false">Inspector</button>
       <button role="tab" data-tab="charts" aria-selected="false">Charts</button>
       <button role="tab" data-tab="events" aria-selected="false">Events</button>
+      <button role="tab" data-tab="records" aria-selected="false">Records</button>
       <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
     </div>
 
     <div class="panel" id="tab-species" role="tabpanel">
       <div class="cardsbar"><span id="speciesSummary"></span><button id="collapseAll">Collapse all</button></div>
       <div id="cards"></div>
-      <p class="hint">Bigger body means stronger. A blue ring means thirsty, a white ring frozen. A dot in the middle marks a special ability. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
+      <p class="hint">Bigger body means stronger. A blue ring means thirsty, a white ring frozen, a dashed green ring sick. A dot in the middle marks a special ability. Crosses are carcasses, which meat-eaters feed on. Only swimmers enter the water.</p>
       <p class="hint" id="extinctList"></p>
     </div>
 
@@ -395,6 +406,7 @@
           <dt>Strength</dt><dd id="inspStrength"></dd>
           <dt>Diet</dt><dd id="inspDiet"></dd>
           <dt>Can swim</dt><dd id="inspSwims"></dd>
+          <dt>Night eyes</dt><dd id="inspNight"></dd>
           <dt>Ability</dt><dd id="inspAbility"></dd>
           <dt>Prefers</dt><dd id="inspPrefers"></dd>
           <dt>Temperature here</dt><dd id="inspHere"></dd>
@@ -403,6 +415,9 @@
         </dl>
         <h2>Ancestry</h2>
         <p class="ancestry" id="inspAncestry"></p>
+        <h2>Life story</h2>
+        <dl class="facts" id="bioCounts"></dl>
+        <ul class="bio" id="bio"></ul>
         <div class="buttons" style="margin-top:16px">
           <button id="inspFollow" aria-pressed="false">Follow</button>
           <button id="inspClear">Clear selection</button>
@@ -438,14 +453,33 @@
       <ul id="events"></ul>
     </div>
 
+    <div class="panel" id="tab-records" role="tabpanel" hidden>
+      <h2>This world</h2>
+      <dl class="facts" id="worldFacts"></dl>
+      <h2>Hall of fame</h2>
+      <dl class="facts records" id="records"></dl>
+      <p class="hint" style="margin-top:10px">Records cover this world since it began, including species that have died out. Loading a saved world from before records were kept starts them afresh.</p>
+    </div>
+
     <div class="panel" id="tab-settings" role="tabpanel" hidden>
       <h2>Environment</h2>
       <div class="field"><div class="row"><label for="fRate">Food supply</label><output id="fOut">1.0</output></div><input type="range" id="fRate" min="0.3" max="2" step="0.1" value="1"></div>
       <div class="field"><div class="row"><label for="mut">Mutation rate</label><output id="mutOut">0.4</output></div><input type="range" id="mut" min="0" max="1" step="0.1" value="0.4"></div>
-      <div class="field"><div class="row"><label for="swimShare">Born able to swim</label><output id="swimOut">20%</output></div><input type="range" id="swimShare" min="0" max="100" step="5" value="20"></div>
-      <p class="hint">Swimmers cross water and reach the plants growing in it. Everyone else has to go around.</p>
+      <div class="field"><div class="row"><label for="swimShare">Founders able to swim</label><output id="swimOut">20%</output></div><input type="range" id="swimShare" min="0" max="100" step="5" value="20"></div>
+      <p class="hint">Swimmers cross water and reach the plants growing in it. Everyone else has to go around. Young inherit swimming from their parent (1 in 50 differs), so a species can take to the water or give it up. This share applies to the next new world.</p>
       <label class="check"><input type="checkbox" id="abilitiesOn" checked> Special abilities</label>
       <p class="hint">Now and then a newborn gains an ability, which its offspring inherit. Weaker creatures gain camouflage or a dash; stronger ones gain spit, freeze or a pull that drags weaker enemies in. Abilities are stronger in stronger creatures and turn up more often as a species evolves.</p>
+      <h2>Living world</h2>
+      <label class="check"><input type="checkbox" id="dayNightOn" checked> Day and night</label>
+      <p class="hint">Most creatures see half as far at midnight. A few are born with night eyes, which their young inherit: they see fully at night but half as far at noon.</p>
+      <label class="check"><input type="checkbox" id="diseaseOn" checked> Sickness</label>
+      <p class="hint">Now and then a creature falls sick and passes it to its own kind nearby, so crowded species suffer most. Sick creatures use more energy and have a dashed green ring; once better they cannot catch it again for a while.</p>
+      <label class="check"><input type="checkbox" id="herdingOn" checked> Herds and packs</label>
+      <p class="hint">Well-fed creatures with nothing to do keep near others of their kind, which then fight off attackers together.</p>
+      <label class="check"><input type="checkbox" id="migrationOn" checked> Migration</label>
+      <p class="hint">A creature far out of its climate sets off north or south for a better one before stopping to feed.</p>
+      <label class="check"><input type="checkbox" id="seedingOn" checked> Spreading plants</label>
+      <p class="hint">A quarter of new plants sprout beside existing ones, so plants spread out in patches and grazed-bare land is slow to grow back.</p>
       <h2>Notifications</h2>
       <label class="check"><input type="checkbox" id="toastsOn" checked> Pop up events as they happen</label>
       <div class="checks" id="toastGroups" role="group" aria-label="Events to pop up"></div>
@@ -467,6 +501,9 @@
       </div>
       <p class="hint">The same seed always builds the same world.</p>
       <div class="buttons"><button id="reset">New world</button></div>
+      <h2>Scenarios</h2>
+      <p class="hint">Start a new world set up a particular way. The changes apply to that world only; "New world" goes back to your usual settings and species.</p>
+      <ul class="scenarios" id="scenarios"></ul>
       <h2>Founding species</h2>
       <p class="hint">Every new world starts with these species. Rename them, change their numbers and traits, add your own or remove some, then press New world or build a map below. The world already running is not affected.</p>
       <div id="founders"></div>

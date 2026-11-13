@@ -23,9 +23,9 @@ export function wrapDistance(delta, span) {
 }
 
 // Fills `water` (1 = water, 0 = land) with a few irregular lakes.
-export function generateLakes(water, random) {
+export function generateLakes(water, random, count = RULES.lakeCount) {
   water.fill(0);
-  for (let k = 0; k < RULES.lakeCount; k++) {
+  for (let k = 0; k < count; k++) {
     const cx = random() * GRID_W;
     const cy = 3 + random() * (GRID_H - 6);
     const radius = 2.2 + random() * 2.8;
@@ -127,6 +127,20 @@ const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
 const YEAR_TICKS = 2 * Math.PI * RULES.seasonLength;
 
 // The year (starting at 1) and season name for a tick. Summer is the warm peak.
+// How light it is: 1 at noon, 0 at midnight. Ticks start at noon.
+export function daylightAt(tick) {
+  return 0.5 + 0.5 * Math.cos((2 * Math.PI * tick) / RULES.dayLength);
+}
+
+// 'Day', 'Dusk', 'Night' or 'Dawn', for the bottom bar.
+export function timeOfDay(tick) {
+  const phase = (tick % RULES.dayLength) / RULES.dayLength; // 0 is noon, 0.5 midnight
+  if (phase < 0.2 || phase >= 0.8) return 'Day';
+  if (phase < 0.3) return 'Dusk';
+  if (phase < 0.7) return 'Night';
+  return 'Dawn';
+}
+
 export function seasonAt(tick) {
   const phase = (tick / RULES.seasonLength) % (2 * Math.PI);
   const quarter = Math.floor(((phase + Math.PI / 4) % (2 * Math.PI)) / (Math.PI / 2));
@@ -137,7 +151,7 @@ export function seasonAt(tick) {
 // season, any heat wave or cold snap (`boost`), the weather fronts, and
 // `offset`, the per-cell warming or cooling left by brushes and meteors.
 export function updateTemperature(temperature, fronts, tick, boost, params, offset) {
-  const season = params.seasonSwing * Math.sin(tick / RULES.seasonLength) + boost;
+  const season = params.seasonSwing * Math.sin(tick / RULES.seasonLength) + boost + (params.climateShift || 0);
   for (let gy = 0; gy < GRID_H; gy++) {
     for (let gx = 0; gx < GRID_W; gx++) {
       const x = gx * CELL + 5, y = gy * CELL + 5;

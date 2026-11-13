@@ -39,6 +39,9 @@ export function spawnCreature(id, species, traits, x, y, swimmerShare, random) {
     cooldown: 0,   // ticks before it can use its ability again
     frozen: 0,     // ticks left unable to move or fight (frozen, or held after a pull)
     dashing: 0,    // ticks left of a dash
+    sick: 0,       // ticks left of being sick
+    immune: 0,     // ticks left of being unable to catch sickness
+    nightEyes: traits.diet > 0.5, // sees well at night, less well by day; hunting founders start with it
   };
 }
 
@@ -67,8 +70,8 @@ export function makeOffspring(id, parent, tick, mutationRate, params, random) {
     strength: mutate(parent.strength, 1, limits.strength),
     preferredTemp: mutate(parent.preferredTemp, params.tempMutationScale, limits.preferredTemp),
     diet: mutate(parent.diet, RULES.dietMutationScale, limits.diet),
-    // Swimming is not inherited: every newborn has the same chance of it.
-    swimmer: random() < params.swimmerShare,
+    // Swimming is inherited, though now and then a newborn differs from its parent.
+    swimmer: random() < RULES.swimFlip ? !parent.swimmer : parent.swimmer,
     detour: 0,
     blocked: 0,
     slide: null,
@@ -76,5 +79,8 @@ export function makeOffspring(id, parent, tick, mutationRate, params, random) {
     cooldown: 0,
     frozen: 0,
     dashing: 0,
+    sick: 0,
+    immune: 0,
+    nightEyes: random() < RULES.nightEyesFlip ? !parent.nightEyes : !!parent.nightEyes,
   };
 }

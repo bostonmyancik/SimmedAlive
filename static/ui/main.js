@@ -3,12 +3,13 @@
 
 import { createSim } from '../sim/sim.js';
 import { randomSeed } from '../sim/rng.js';
-import { RULES, SPECIES } from '../sim/params.js';
+import { RULES, SPECIES, DEFAULT_PARAMS } from '../sim/params.js';
 import { normalizeFounders, colorForSpecies } from '../sim/species.js';
 import { ABILITY_NAMES, ABILITY_HINTS } from '../sim/abilities.js';
 import { breedEnergy } from '../sim/creatures.js';
+import { SCENARIOS, SCENARIO_PARAMS } from '../sim/scenarios.js';
 import { TOAST_GROUPS, tidyToastSettings, wantsToast, createToasts } from './toasts.js';
-import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, wrapDistance } from '../sim/world.js';
+import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, timeOfDay, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
 import { AUTOSAVE_NAME, listSaves, getSave, getAutosave, putSave, deleteSave } from './saves.js';
@@ -181,6 +182,8 @@ function refreshSpecies() {
       '<dt>Diet</dt><dd>' + dietWords(st.diet) + '</dd>' +
       '<dt>Stage</dt><dd>' + sp.stage + '</dd>' +
       '<dt>Can swim</dt><dd>' + Math.round(st.swimmers * 100) + '%</dd>' +
+      (sim.params.dayNight ? '<dt>Night eyes</dt><dd>' + Math.round(st.nightEyes * 100) + '%</dd>' : '') +
+      (st.sick > 0 ? '<dt>Sick</dt><dd>' + Math.max(1, Math.round(st.sick * 100)) + '%</dd>' : '') +
       abilityFacts(st.abilities) +
       '<dt>Speed</dt><dd>' + st.speed.toFixed(1) + '</dd>' +
       '<dt>Strength</dt><dd>' + st.strength.toFixed(1) + '</dd>' +
@@ -227,7 +230,7 @@ function refreshInspector() {
   const stressed = Math.abs(gap) > sim.params.tempTolerance;
   let status;
   if (selectedDiedAt !== null) status = 'Died at tick ' + fmt(selectedDiedAt);
-  else status = [c.frozen > 0 ? 'Frozen' : null, c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
+  else status = [c.frozen > 0 ? 'Frozen' : null, c.sick > 0 ? 'Sick' : null, c.thirsty ? 'Thirsty' : null, stressed ? (gap > 0 ? 'Too hot' : 'Too cold') : null]
     .filter(Boolean).join(' · ') || 'Comfortable';
 
   $('inspTitle').innerHTML = dot(sp.color) + sp.name;
@@ -242,6 +245,7 @@ function refreshInspector() {
   $('inspStrength').textContent = c.strength.toFixed(2);
   $('inspDiet').textContent = dietWords(c.diet);
   $('inspSwims').textContent = c.swimmer ? 'Yes' : 'No';
+  $('inspNight').textContent = c.nightEyes ? 'Yes: sees well at night, less by day' : 'No';
   $('inspAbility').textContent = c.ability ? ABILITY_NAMES[c.ability] + ': ' + ABILITY_HINTS[c.ability].toLowerCase() : 'None';
   $('inspPrefers').textContent = c.preferredTemp.toFixed(1) + '°C';
   $('inspHere').textContent = here.toFixed(1) + '°C';
@@ -251,6 +255,61 @@ function refreshInspector() {
     .map((id) => dot(sim.species[id].color) + sim.species[id].name).join(' &rarr; ') +
     '<br>Generation ' + c.generation + ' of its line.';
   $('inspFollow').disabled = selectedDiedAt !== null;
+  refreshBiography();
+}
+
+// What the selected creature has done since it was picked.
+function refreshBiography() {
+  const bio = sim.biography;
+  if (!bio) return;
+  const n = bio.counts;
+  $('bioCounts').innerHTML =
+    '<dt>Watched since</dt><dd>Tick ' + fmt(bio.since) + '</dd>' +
+    '<dt>Plants eaten</dt><dd>' + fmt(n.plants) + '</dd>' +
+    '<dt>Carcasses eaten</dt><dd>' + fmt(n.carcasses) + '</dd>' +
+    '<dt>Kills</dt><dd>' + fmt(n.kills) + '</dd>' +
+    '<dt>Young</dt><dd>' + fmt(n.young) + '</dd>' +
+    (n.abilityUses ? '<dt>Ability used</dt><dd>' + fmt(n.abilityUses) + (n.abilityUses === 1 ? ' time' : ' times') + '</dd>' : '');
+  const key = bio.entries.length + ':' + (bio.entries.length ? bio.entries[bio.entries.length - 1].tick : 0);
+  if ($('bio').dataset.key === key) return;
+  $('bio').dataset.key = key;
+  $('bio').innerHTML = bio.entries.length
+    ? bio.entries.slice().reverse().map((e) => '<li><span class="when">Tick ' + fmt(e.tick) + '</span><span>' + e.text + '</span></li>').join('')
+    : '<li><span>Nothing much yet. Fights, kills, young, sickness and how it dies are noted here.</span></li>';
+}
+
+// ---------- Records ----------
+
+const holder = (r, unit) => r
+  ? fmt(r.value) + unit + '<span class="who">' + (r.name ? dot(r.color) + r.name + ', ' : '') + 'tick ' + fmt(r.tick) + '</span>'
+  : '–';
+
+function refreshRecords() {
+  if ($('tab-records').hidden) return;
+  const r = sim.records;
+  const shown = shownSpecies();
+  const best = (score) => shown.reduce((a, sp) => (!a || score(sp) > score(a) ? sp : a), null);
+  const lasted = (sp) => (sp.extinctTick ?? sim.tick) - sp.bornTick;
+  const longest = best(lasted), deadliest = best((sp) => sp.kills), evolved = best((sp) => sp.stage);
+  const speciesRecord = (sp, text) => sp
+    ? text + '<span class="who">' + dot(sp.color) + sp.name + (sp.count ? ', still alive' : ', died out at tick ' + fmt(sp.extinctTick)) + '</span>'
+    : '–';
+  const { year } = seasonAt(sim.tick);
+  $('worldFacts').innerHTML =
+    (sim.params.scenario ? '<dt>Scenario</dt><dd>' + (SCENARIOS.find((s) => s.key === sim.params.scenario) || { name: sim.params.scenario }).name + '</dd>' : '') +
+    '<dt>Age</dt><dd>' + fmt(sim.tick) + ' ticks (year ' + year + ')</dd>' +
+    '<dt>Births</dt><dd>' + fmt(r.births) + '</dd>' +
+    '<dt>Deaths</dt><dd>' + fmt(r.deaths) + '</dd>' +
+    '<dt>Species that took hold</dt><dd>' + fmt(shown.length) + '</dd>' +
+    '<dt>Died out</dt><dd>' + fmt(shown.filter((sp) => sp.count === 0).length) + '</dd>';
+  $('records').innerHTML =
+    '<dt>Biggest population</dt><dd>' + holder(r.peakPopulation, ' creatures') + '</dd>' +
+    '<dt>Biggest species</dt><dd>' + holder(r.peakSpecies, ' members') + '</dd>' +
+    '<dt>Longest-lasting species</dt><dd>' + speciesRecord(longest, longest ? fmt(lasted(longest)) + ' ticks' : '') + '</dd>' +
+    '<dt>Most kills</dt><dd>' + speciesRecord(deadliest && deadliest.kills ? deadliest : null, deadliest ? fmt(deadliest.kills) : '') + '</dd>' +
+    '<dt>Most evolved</dt><dd>' + speciesRecord(evolved && evolved.stage > 1 ? evolved : null, evolved ? 'Stage ' + evolved.stage : '') + '</dd>' +
+    '<dt>Most young from one creature</dt><dd>' + holder(r.mostOffspring, '') + '</dd>' +
+    '<dt>Longest family line</dt><dd>' + holder(r.highestGeneration, ' generations') + '</dd>';
 }
 
 function setFollowing(on) {
@@ -262,6 +321,7 @@ function setFollowing(on) {
 function select(creature) {
   selected = creature;
   selectedDiedAt = null;
+  sim.watch(creature ? creature.id : null);
   setFollowing(false);
   refreshInspector();
   if (creature) showTab('inspector');
@@ -289,6 +349,7 @@ function showTab(name) {
     $('tab-' + tab.dataset.tab).hidden = !on;
   }
   $('sidebar').classList.add('open');
+  refreshRecords();
   drawCharts();
 }
 
@@ -306,7 +367,8 @@ function drawCharts() {
 function refreshClock() {
   const { year, season } = seasonAt(sim.tick);
   $('clock').textContent = (inPast() ? 'Viewing tick ' + fmt(sim.tick) + ' of ' + fmt(latestTick) : 'Tick ' + fmt(sim.tick))
-    + ' · Year ' + year + ' · ' + season + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
+    + ' · Year ' + year + ' · ' + season + (sim.params.dayNight ? ' · ' + timeOfDay(sim.tick) : '')
+    + (sim.tick < sim.droughtUntil ? ' · Drought' : '');
   $('toNow').hidden = !inPast();
   $('pause').textContent = !paused ? 'Pause' : inPast() ? 'Resume from here' : 'Resume';
 }
@@ -333,6 +395,11 @@ function refreshMarkers() {
 function refreshWorldSettings() {
   $('autoDisasters').checked = !!sim.params.autoDisasters;
   $('abilitiesOn').checked = !!sim.params.abilities;
+  $('dayNightOn').checked = !!sim.params.dayNight;
+  $('diseaseOn').checked = !!sim.params.disease;
+  $('herdingOn').checked = sim.params.herding > 0;
+  $('migrationOn').checked = !!sim.params.migration;
+  $('seedingOn').checked = sim.params.plantSeeding > 0;
   if (document.activeElement === $('swimShare')) return;
   const percent = Math.round(sim.params.swimmerShare * 100);
   $('swimShare').value = percent;
@@ -341,6 +408,7 @@ function refreshWorldSettings() {
 
 function refreshAll() {
   refreshWorldSettings();
+  refreshRecords();
   refreshSpecies();
   refreshInspector();
   refreshEvents();
@@ -396,12 +464,16 @@ function setTool(name) {
   canvas.classList.toggle('brush', name !== 'select');
   $('toolopts').hidden = !(name in TOOL_TIPS);
   $('kinds').hidden = name !== 'terrain';
-  $('sizeRow').hidden = !BRUSH_TOOLS.includes(name);
-  $('toolTip').textContent = TOOL_TIPS[name] || '';
+  const filling = name === 'terrain' && $('fillMode').checked;
+  $('fillRow').hidden = name !== 'terrain';
+  $('sizeRow').hidden = !BRUSH_TOOLS.includes(name) || filling;
+  $('toolTip').textContent = filling ? 'Click to fill the whole connected area of one kind of land, or one stretch of water.' : TOOL_TIPS[name] || '';
   // Show the layer the tool changes.
   if (name === 'terrain') setLayer('none');
   if (name === 'warm' || name === 'cool') setLayer('temperature');
 }
+
+const fillingTerrain = () => tool === 'terrain' && $('fillMode').checked;
 
 function brushRadius() {
   return tool === 'meteor' ? RULES.meteorRadius : +$('brushSize').value;
@@ -409,7 +481,7 @@ function brushRadius() {
 
 // The circle to outline under the pointer, in world pixels.
 function brushOutline() {
-  if (!hover || tool === 'select') return null;
+  if (!hover || tool === 'select' || fillingTerrain()) return null;
   const at = camera.toWorld(hover.x, hover.y);
   return { x: at.x, y: at.y, radius: brushRadius() };
 }
@@ -417,8 +489,32 @@ function brushOutline() {
 // ---------- World ----------
 
 function newWorld(seed) {
+  clearScenario();
   sim.generate(seed);
   showWorld();
+}
+
+// Puts back the settings a scenario changed.
+function clearScenario() {
+  for (const key of SCENARIO_PARAMS) sim.params[key] = DEFAULT_PARAMS[key];
+}
+
+// Starts a new world from a scenario: its settings, and its founders in place
+// of yours for this world only.
+function startScenario(key) {
+  const scenario = SCENARIOS.find((s) => s.key === key);
+  clearScenario();
+  Object.assign(sim.params, scenario.params || {}, { scenario: key });
+  const yours = sim.founders;
+  if (scenario.founders) sim.setFounders(scenario.founders(originalFounders()));
+  sim.generate(randomSeed(), { lakes: scenario.lakes });
+  sim.founders = yours;
+  showWorld();
+}
+
+function renderScenarios() {
+  $('scenarios').innerHTML = SCENARIOS.map((s) =>
+    '<li><button data-scenario="' + s.key + '">' + s.name + '</button><span>' + s.text + '</span></li>').join('');
 }
 
 // Points the page at whatever world the sim now holds (new or loaded).
@@ -536,6 +632,7 @@ function addFounder() {
 
 // Starts an empty world to paint: open land ('blank') or the present map ('keep').
 function buildMap(kind) {
+  clearScenario();
   sim.generate(kind === 'blank' ? randomSeed() : sim.seed, { map: kind, populate: false });
   $('buildText').textContent = BUILD_TIP;
   showWorld();
@@ -716,7 +813,15 @@ function creatureNear(at) {
 function clickMap(sx, sy) {
   const at = camera.toWorld(sx, sy);
   if (at.y < 0 || at.y >= HEIGHT) return;
-  if (tool === 'meteor') {
+  if (fillingTerrain()) {
+    branchHere();
+    if (sim.fillTerrain(at.x, at.y, brushKind)) {
+      worldWasEdited();
+      map.paintWorld();
+      map.paintLayer();
+      refreshAll();
+    }
+  } else if (tool === 'meteor') {
     branchHere();
     sim.meteor(at.x, at.y);
     worldWasEdited();
@@ -747,7 +852,7 @@ canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, { ...pointerPos(e), startX: e.clientX, startY: e.clientY });
   if (pointers.size === 1) {
     dragged = false;
-    painting = e.button === 0 && BRUSH_TOOLS.includes(tool);
+    painting = e.button === 0 && BRUSH_TOOLS.includes(tool) && !fillingTerrain();
     if (painting) paint(pointerPos(e).x, pointerPos(e).y);
   } else {
     painting = false;
@@ -1033,6 +1138,19 @@ $('abilitiesOn').onchange = (e) => {
   sim.params.abilities = e.target.checked;
   worldEdited = true;
 };
+// The living-world switches. Herding and seeding are strengths, on or off here.
+const worldSwitch = (id, apply) => {
+  $(id).onchange = (e) => {
+    apply(e.target.checked);
+    worldEdited = true;
+    refreshClock();
+  };
+};
+worldSwitch('dayNightOn', (on) => { sim.params.dayNight = on; });
+worldSwitch('diseaseOn', (on) => { sim.params.disease = on; });
+worldSwitch('herdingOn', (on) => { sim.params.herding = on ? DEFAULT_PARAMS.herding : 0; });
+worldSwitch('migrationOn', (on) => { sim.params.migration = on; });
+worldSwitch('seedingOn', (on) => { sim.params.plantSeeding = on ? DEFAULT_PARAMS.plantSeeding : 0; });
 $('spd').oninput = (e) => ($('spdOut').textContent = SPEEDS[+e.target.value] + 'x');
 const disaster = (strike) => () => { branchHere(); strike(); worldWasEdited(); refreshAll(); };
 $('toNow').onclick = () => goTo(latestTick, true);
@@ -1062,6 +1180,12 @@ $('resetFounders').onclick = () => {
   renderFounders();
 };
 $('blankMap').onclick = () => buildMap('blank');
+renderScenarios();
+$('scenarios').onclick = (e) => {
+  const button = e.target.closest('button[data-scenario]');
+  if (button) startScenario(button.dataset.scenario);
+};
+$('fillMode').onchange = () => setTool(tool);
 $('editMap').onclick = () => buildMap('keep');
 $('release').onclick = releaseSpecies;
 $('buildText').textContent = BUILD_TIP;
