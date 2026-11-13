@@ -284,6 +284,21 @@ test('meat-eaters bite harder', () => {
   assert.ok(damage(1) > damage(0) * 2);
 });
 
+test('a heavier body moves more slowly', () => {
+  const stepLength = (strength) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const c = creature({ ...spot, strength, speed: 2 });
+    sim.creatures = [c];
+    sim.step(0, 0);
+    const dx = Math.abs(c.x - spot.x);
+    return Math.hypot(Math.min(dx, WIDTH - dx), c.y - spot.y);
+  };
+  assert.ok(Math.abs(stepLength(1) - 2) < 1e-9, 'strength 1 moves at full speed');
+  assert.ok(Math.abs(stepLength(0.5) - 2) < 1e-9, 'being weaker than 1 does not speed it up');
+  assert.ok(Math.abs(stepLength(3) - 2 / (1 + 2 * 0.25)) < 1e-9, 'strength 3 moves at 2/3 of its speed');
+});
+
 test('creatures do not attack their own species', () => {
   const sim = emptyWorld();
   const spot = findCell(sim, inlandMild);
@@ -709,12 +724,14 @@ test('a whole species shifts toward what its members have become, and reaches a 
 });
 
 test('evolution keeps a drifting species together: fewer species split off', () => {
-  const splits = (params) => {
-    const sim = createSim({ seed: 3, params });
+  // Counts the species that were announced (reached 10 members), over two
+  // worlds, since a single world can go either way.
+  const splits = (params) => [1, 2].reduce((total, seed) => {
+    const sim = createSim({ seed, params });
     sim.generate();
     for (let i = 0; i < 20000; i++) sim.step(1, 0.4);
-    return sim.species.length;
-  };
+    return total + sim.species.filter((sp) => sp.established).length;
+  }, 0);
   assert.ok(splits({}) < splits({ evolveEvery: 1e9 }));
 });
 

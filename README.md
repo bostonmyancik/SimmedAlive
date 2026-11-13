@@ -87,6 +87,7 @@ python3 -m unittest discover tests
 - **Diet.** Every creature has a `diet` from 0 (plants only) to 1 (meat only). A plant is worth less the more meat is in the diet, and a carcass is worth more. Every death leaves a carcass that rots after a while. Meat-eaters bite harder and hunt weaker species when hungry.
 - **Swimming.** A share of creatures (20% by default, set in Settings) are born able to swim. Swimmers cross water, more slowly and at an energy cost, and reach the plants that grow in it; everyone else goes around. Swimming is a matter of chance at birth, not inherited.
 - **Getting around obstacles.** A creature blocked by water or mountains slides along the edge and holds that course for a while before heading for its target again, so it works its way round instead of pacing in front of it. A creature caught under newly painted water or mountains can always walk out.
+- **Size.** Strength makes a creature hit harder, but a heavier body is slower: each point of strength above 1 costs a quarter of its top speed, so a strength-3 creature moves at two thirds of its speed and a strength-5 one at half (`sizeSlowdown`). Small creatures can outrun big ones and reach food first, so a world keeps a mix of sizes instead of every species growing ever bigger.
 - **Breeding.** A well-fed creature in its own climate splits in two, sharing its energy with the child. Small creatures need less energy to split and big ones more: 70 plus 30 for each point of strength, so a strength-1 creature splits above 100 and a strength-4 one above 190 (`breedEnergyBase` and `breedEnergyPerStrength` in `RULES`).
 - **Evolution.** Every 2,000 ticks each established species shifts part of the way toward the average of its members, so a species changes as a whole instead of only ever splitting. When it has changed far enough since its last stage it reaches a new stage, which the event log describes ("faster, stronger and more meat-eating"). A stage takes much longer than a split; a species usually reaches one every 10,000 to 20,000 ticks.
 - **Speciation.** Traits mutate at each birth. A newborn that has drifted too far from its species' current traits joins a closely related species it resembles, or founds a new one. A species and the one it split from do not fight; all other species do. A new species is announced once it has 10 members.
@@ -122,6 +123,7 @@ The balance settings are `DEFAULT_PARAMS`:
 | `dietDamageBonus` | Extra combat damage for meat-eaters |
 | `fleeDistance` | Distance at which a creature flees a much stronger one |
 | `strengthUpkeep` | Energy upkeep cost of strength |
+| `sizeSlowdown` | Share of top speed lost per point of strength above 1 |
 | `stressCost` | Energy cost per degree of temperature stress |
 | `maxBreedingStress` | Max stress at which a creature can still reproduce |
 | `tempMutationScale` | How fast preferred temperature mutates |

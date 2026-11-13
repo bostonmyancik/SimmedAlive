@@ -896,7 +896,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // round an obstacle the creature still eats and drinks what it reaches,
     // but keeps its course rather than turning back toward what it was after.
     const course = c.heading;
-    let move = c.speed * (swimming ? RULES.swimSpeedFactor : 1);
+    // A heavier body is slower: above strength 1 each point costs a share of top speed.
+    const pace = c.speed / (1 + P.sizeSlowdown * Math.max(0, c.strength - 1));
+    let move = pace * (swimming ? RULES.swimSpeedFactor : 1);
     const mustFlee = enemy
       && enemy.strength > c.strength * RULES.fleeStrengthRatio
       && enemyDistSq < P.fleeDistance * P.fleeDistance;
@@ -927,7 +929,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.heading = Math.atan2(enemy.y - c.y, enemy.x - c.x);
     } else if (meal) {
       c.heading = Math.atan2(meal.y - c.y, meal.x - c.x);
-      if (mealDistSq < Math.max(RULES.minEatRangeSq, c.speed * c.speed)) {
+      if (mealDistSq < Math.max(RULES.minEatRangeSq, pace * pace)) {
         if (meal === carcass) {
           sim.carcasses.remove(meal);
           meal.eaten = true;
