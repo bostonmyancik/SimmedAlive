@@ -12,6 +12,7 @@ import { TOAST_GROUPS, tidyToastSettings, wantsToast, createToasts } from './toa
 import { WIDTH, HEIGHT, PLAIN, FERTILE, DESERT, MOUNTAIN, cellIndex, seasonAt, timeOfDay, wrapDistance } from '../sim/world.js';
 import { createCamera } from './camera.js';
 import { createMapView, terrainColors } from './mapview.js';
+import { buildReport } from './report.js';
 import { AUTOSAVE_NAME, listSaves, getSave, getAutosave, putSave, deleteSave } from './saves.js';
 import {
   METRICS, SAMPLE_EVERY, drawLineChart, drawTimeline, drawFamilyTree, windowStart, windowSpan,
@@ -1203,24 +1204,39 @@ window.lifesimCharts = {
     tick: sim.tick,
     seed: sim.seed,
   }),
+  // The full report window (templates/report.html) asks for this when it opens and on Refresh.
+  report: () => ({
+    report: buildReport({ sim, history, latestTick, settings: { foodRate: +$('fRate').value, mutationRate: +$('mut').value } }),
+    chart: { history, shown: chartedSpecies(), latestTick },
+  }),
 };
-// "Expand here" shows the same charts page over this one, for when a separate
-// window is not wanted or the browser will not open one.
-function setChartsOverlay(open) {
+// "Expand here" and "Report here" show the charts or report page over this
+// one, for when a separate window is not wanted or the browser will not open one.
+function setOverlay(page) {
   const overlay = $('chartsOverlay');
-  overlay.hidden = !open;
+  overlay.hidden = !page;
   let frame = overlay.querySelector('iframe');
-  if (open && !frame) {
-    frame = document.createElement('iframe');
-    frame.src = '/charts';
-    frame.title = 'Charts';
-    overlay.append(frame);
-  } else if (!open && frame) {
+  if (frame && (!page || frame.dataset.page !== page)) {
     frame.remove(); // stops it redrawing while out of sight
+    frame = null;
+  }
+  if (page && !frame) {
+    frame = document.createElement('iframe');
+    frame.src = '/' + page;
+    frame.dataset.page = page;
+    frame.title = $('overlayTitle').textContent = page === 'report' ? 'Full report' : 'Charts';
+    overlay.append(frame);
   }
 }
+const setChartsOverlay = (open) => setOverlay(open ? 'charts' : null);
 $('expandCharts').onclick = () => setChartsOverlay(true);
-$('closeCharts').onclick = () => setChartsOverlay(false);
+$('closeCharts').onclick = () => setOverlay(null);
+$('expandReport').onclick = () => setOverlay('report');
+$('openReport').onclick = () => {
+  // Each report is a snapshot, so every click opens a fresh one.
+  const opened = window.open('/report', '_blank');
+  $('reportHint').hidden = !!opened;
+};
 
 let chartsWindow = null;
 $('popCharts').onclick = () => {
