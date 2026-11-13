@@ -273,11 +273,24 @@ test('the dead leave a carcass that a meat-eater eats and a plant-eater ignores'
   sim.step(0, 0);
   assert.equal(sim.carcasses.size, 1);
 
-  const hunter = creature({ x: spot.x + 2, y: spot.y, diet: 1, energy: 5 });
+  const hunter = creature({ x: spot.x + 2, y: spot.y, species: 3, diet: 1, energy: 5, strength: 3 }); // too big to split on one meal
   sim.creatures = [hunter];
   sim.step(0, 0);
   assert.equal(sim.carcasses.size, 0);
   assert.ok(hunter.energy > 5 + RULES.carcassEnergy - 1);
+});
+
+test('nobody eats a carcass of its own kind, and a save remembers whose it is', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  leaveCarcass(sim, spot); // a Meadowfolk
+  const copy = createSim({ seed: 7 });
+  copy.load(JSON.parse(JSON.stringify(sim.save())));
+  for (const world of [sim, copy]) {
+    world.creatures = [creature({ x: spot.x + 2, y: spot.y, species: 1, diet: 1, energy: 5 })];
+    world.step(0, 0);
+    assert.equal(world.carcasses.size, 1, 'a Meadowfolk ate one of its own');
+  }
 });
 
 test('an uneaten carcass rots away', () => {

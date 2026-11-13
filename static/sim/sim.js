@@ -565,7 +565,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       creatures: sim.creatures.map((c) => CREATURE_FIELDS.map((field) => c[field])),
       projectiles: sim.projectiles.map((p) => ({ ...p })),
       food: [...sim.food].map((f) => [f.x, f.y]),
-      carcasses: [...sim.carcasses].map((k) => [k.x, k.y, k.tick]),
+      carcasses: [...sim.carcasses].map((k) => [k.x, k.y, k.tick, k.species]),
       events: sim.events.map((e) => ({ ...e })),
       records: JSON.parse(JSON.stringify(sim.records)),
     };
@@ -630,7 +630,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     const wet = (x, y) => sim.water[cellIndex(x, y)] === 1;
     for (const [x, y] of data.food) sim.food.add({ x, y, wet: wet(x, y) });
     sim.carcasses.clear();
-    carcassQueue = data.carcasses.map(([x, y, tick]) => ({ x, y, tick, eaten: false, wet: wet(x, y) }));
+    // Carcasses from older saves have no species, so anyone may eat them.
+    carcassQueue = data.carcasses.map(([x, y, tick, species = null]) => ({ x, y, tick, species, eaten: false, wet: wet(x, y) }));
     for (const carcass of carcassQueue) sim.carcasses.add(carcass);
     carcassQueue.sort((a, b) => a.tick - b.tick);
   }
@@ -1108,7 +1109,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // Only swimmers go for what is lying in water; the rest would just pace the shore.
     const reachable = c.swimmer ? undefined : onDryLand;
     const plant = plantWorth > 0 ? sim.food.nearest(c.x, c.y, visionSq, reachable) : null;
-    const carcass = meatWorth > 0 ? sim.carcasses.nearest(c.x, c.y, visionSq, reachable) : null;
+    // Nobody eats its own kind.
+    const edible = (k) => k.species !== c.species && (c.swimmer || !k.wet);
+    const carcass = meatWorth > 0 ? sim.carcasses.nearest(c.x, c.y, visionSq, edible) : null;
     const appeal = (item, worth) => (item ? worth / (Math.sqrt(distSqTo(item)) + 20) : 0);
     const meal = appeal(carcass, meatWorth) > appeal(plant, plantWorth) ? carcass : plant;
     const mealDistSq = meal ? distSqTo(meal) : visionSq;
@@ -1299,7 +1302,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
           const bio = sim.biography;
           note(c, bio.cause || (c.age >= RULES.maxAge ? 'Died of old age' : c.hydration <= 0 ? 'Died of thirst' : 'Starved'));
         }
-        const carcass = { x: c.x, y: c.y, tick: sim.tick, eaten: false, wet: sim.water[cellIndex(c.x, c.y)] === 1 };
+        const carcass = { x: c.x, y: c.y, tick: sim.tick, species: c.species, eaten: false, wet: sim.water[cellIndex(c.x, c.y)] === 1 };
         sim.carcasses.add(carcass);
         carcassQueue.push(carcass);
       }
