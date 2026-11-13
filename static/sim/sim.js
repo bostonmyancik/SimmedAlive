@@ -219,7 +219,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       stageOrigin: traitsOf(founder),
       abilities: [],
       swims: P.swimmerShare >= RULES.swimSpreadAt,
-      nocturnal: false,
+      nocturnal: founder.diet > 0.5,
       lastTrendCount: founder.startCount,
     }));
 
@@ -722,8 +722,9 @@ export function createSim({ seed = 1, params = {} } = {}) {
     && distSq > RULES.abilities.camouflage.seenWithin * RULES.abilities.camouflage.seenWithin;
 
   // Uses the creature's ability on `enemy` (the nearest one it can see) when
-  // it is ready and the moment suits it. `fleeing` is true when it is running away.
-  function useAbility(c, enemy, enemyDistSq, fleeing) {
+  // it is ready and the moment suits it. `fleeing` is true when it is running
+  // away and `hunting` when it is going after the enemy.
+  function useAbility(c, enemy, enemyDistSq, fleeing, hunting) {
     if (!P.abilities || !c.ability || c.cooldown > 0 || !enemy) return;
     const rule = RULES.abilities[c.ability];
     if (!rule.cost || c.energy < rule.cost + 10) return;
@@ -737,18 +738,20 @@ export function createSim({ seed = 1, params = {} } = {}) {
         used = true;
       }
     } else if (c.ability === 'spit') {
-      if (outOfReach && enemyDistSq <= power.range * power.range) {
+      // Spit stings, holding the target still for a moment: worth it to catch prey or to get away.
+      if ((fleeing || hunting) && outOfReach && enemyDistSq <= power.range * power.range) {
         const angle = Math.atan2(enemy.y - c.y, enemy.x - c.x);
         sim.projectiles.push({
           x: c.x, y: c.y,
           vx: Math.cos(angle) * rule.speedPx, vy: Math.sin(angle) * rule.speedPx,
-          species: c.species, damage: power.damage,
+          species: c.species, damage: power.damage, stun: rule.stun,
           ticks: Math.ceil(power.range / rule.speedPx) + 2,
         });
         used = true;
       }
     } else if (c.ability === 'freeze') {
-      if (enemyDistSq <= power.radius * power.radius) {
+      // Kept for when it matters: running away, closing in, or already fighting.
+      if (enemyDistSq <= power.radius * power.radius && (fleeing || hunting || !outOfReach)) {
         creatureGrid.forEachNear(c.x, c.y, power.radius, (o) => {
           if (o.energy > 0 && isHostile(c.species, o.species)) o.frozen = Math.max(o.frozen || 0, power.ticks);
         });
@@ -791,6 +794,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       p.ticks--;
       if (hit) {
         hit.energy -= p.damage;
+        hit.frozen = Math.max(hit.frozen || 0, p.stun || 0);
         if (hit.energy <= 0) sim.species[p.species].kills++;
         sim.effects.push({ kind: 'hit', tick: sim.tick, x: p.x, y: p.y });
       } else if (p.ticks > 0 && p.y >= 0 && p.y < HEIGHT) {
@@ -1011,7 +1015,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       && c.energy < P.huntEnergy * 2 * c.diet
       && (!meal || enemyDistSq < mealDistSq);
 
-    useAbility(c, enemy, enemyDistSq, mustFlee);
+    useAbility(c, enemy, enemyDistSq, mustFlee, canHunt);
     if (c.dashing > 0) {
       c.dashing--;
       move *= RULES.abilities.dash.speed;

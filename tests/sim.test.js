@@ -978,11 +978,12 @@ test('abilities are rare: few newborns gain one, and more as the species evolves
 });
 
 test('freeze stops nearby enemies moving and fighting, but not its own kind', () => {
+  // A hungry meat-eater closing in on weaker prey: the moment to use it.
   const sim = emptyWorld();
   const spot = findCell(sim, inlandMild);
   const temp = sim.temperature[cellIndex(spot.x, spot.y)];
-  const freezer = creature({ ...spot, species: 0, ability: 'freeze', strength: 2, energy: 80, preferredTemp: temp, speed: 0.01 });
-  const enemy = creature({ x: spot.x + 12, y: spot.y, species: 1, strength: 2, energy: 80, preferredTemp: temp });
+  const freezer = creature({ ...spot, species: 0, ability: 'freeze', strength: 2, diet: 1, energy: 80, preferredTemp: temp, speed: 0.01 });
+  const enemy = creature({ x: spot.x + 12, y: spot.y, species: 1, strength: 1, energy: 80, preferredTemp: temp });
   const friend = creature({ x: spot.x - 12, y: spot.y, species: 0, energy: 80, preferredTemp: temp });
   sim.creatures = [freezer, enemy, friend];
   sim.step(0, 0);
@@ -995,18 +996,33 @@ test('freeze stops nearby enemies moving and fighting, but not its own kind', ()
   assert.equal(sim.effects[0].kind, 'freeze');
 });
 
-test('spit flies at a distant enemy and hurts it', () => {
+test('freeze and spit are not wasted on an enemy that is neither prey nor a threat', () => {
+  for (const ability of ['freeze', 'spit']) {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const user = creature({ ...spot, species: 0, ability, strength: 2, diet: 0, energy: 80, preferredTemp: temp, speed: 0.01, vision: 60 });
+    const passer = creature({ x: spot.x + 12, y: spot.y, species: 1, strength: 2, energy: 80, preferredTemp: temp, speed: 0.01 });
+    sim.creatures = [user, passer];
+    sim.step(0, 0);
+    assert.equal(user.cooldown || 0, 0, ability + ' was used');
+  }
+});
+
+test('spit flies at a distant enemy, hurts it and holds it still', () => {
   const sim = emptyWorld();
   const spot = findCell(sim, inlandMild);
   const temp = sim.temperature[cellIndex(spot.x, spot.y)];
-  const spitter = creature({ ...spot, species: 0, ability: 'spit', strength: 2, energy: 80, preferredTemp: temp, speed: 0.01, diet: 0, vision: 60 });
-  const target = creature({ x: spot.x + 30, y: spot.y, species: 1, energy: 50, preferredTemp: temp, speed: 0.01, strength: 2 });
+  // A hungry meat-eater spits at weaker prey out of reach.
+  const spitter = creature({ ...spot, species: 0, ability: 'spit', strength: 2, energy: 80, preferredTemp: temp, speed: 0.01, diet: 1, vision: 60 });
+  const target = creature({ x: spot.x + 30, y: spot.y, species: 1, energy: 50, preferredTemp: temp, speed: 0.01, strength: 1, vision: 5 });
   sim.creatures = [spitter, target];
   sim.step(0, 0);
   assert.equal(sim.projectiles.length, 1);
   for (let i = 0; i < 10 && sim.projectiles.length; i++) sim.step(0, 0);
   assert.equal(sim.projectiles.length, 0);
   assert.ok(target.energy < 50 - abilityPower('spit', 2).damage + 1);
+  assert.ok(target.frozen > 0, 'the sting holds it still');
 });
 
 test('pull drags a weaker enemy in, but not a stronger one', () => {

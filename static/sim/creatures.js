@@ -41,7 +41,7 @@ export function spawnCreature(id, species, traits, x, y, swimmerShare, random) {
     dashing: 0,    // ticks left of a dash
     sick: 0,       // ticks left of being sick
     immune: 0,     // ticks left of being unable to catch sickness
-    nightEyes: false, // sees well at night, less well by day
+    nightEyes: traits.diet > 0.5, // sees well at night, less well by day; hunting founders start with it
   };
 }
 

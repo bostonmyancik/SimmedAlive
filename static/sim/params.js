@@ -56,13 +56,13 @@ export const DEFAULT_PARAMS = {
   // Living world
   plantSeeding: 0.25,       // share of new plants that sprout beside an existing one
   disease: true,           // let sickness break out and spread between creatures of a species
-  herding: 0.25,           // how strongly an idle creature drifts toward others of its species (0 to 1)
+  herding: 0.15,           // how strongly an idle creature drifts toward others of its species (0 to 1)
   migration: true,         // creatures well out of their climate set off toward a better one
   dayNight: true,          // days and nights: sight is short at night except for night eyes
 
   // Abilities
   abilities: true,         // let creatures gain special abilities
-  abilityChance: 0.0004,   // chance a newborn gains one; times (1 + its species' stage)
+  abilityChance: 0.001,    // chance a newborn gains one; times its species' stage
 };
 
 // Fixed rules of the world. These are not exposed as tuning knobs yet.
@@ -138,16 +138,16 @@ export const RULES = {
 
   // Abilities. `strength` is the range of strength a newborn must be in to gain
   // one; the other numbers grow with the owner's strength as shown.
-  abilityLoss: 0.01,           // chance a newborn does not inherit its parent's ability
-  abilityUpkeep: 0.01,         // energy per tick that having any ability costs
+  abilityLoss: 0.003,          // chance a newborn does not inherit its parent's ability
+  abilityUpkeep: 0.004,        // energy per tick that having any ability costs
   abilitySpreadAt: 0.4,        // share of a species with an ability before it counts as theirs...
   abilityFadeAt: 0.1,          // ...and the share below which it is lost again
   abilities: {
     camouflage: { strength: [0, 1.6], seenWithin: 12 },                 // enemies notice it only this close
     dash: { strength: [0, 2.2], ticks: 10, speed: 2.2, cooldown: 250, cost: 2 }, // ticks times strength
-    spit: { strength: [1.3, 9], range: [30, 12], damage: 5, cooldown: 80, cost: 1.5, speedPx: 5 }, // range + 12 x strength
+    spit: { strength: [1.3, 9], range: [30, 12], damage: 5, stun: 8, cooldown: 80, cost: 1.5, speedPx: 5 }, // range + 12 x strength; a hit holds the target `stun` ticks
     freeze: { strength: [1.9, 9], radius: [10, 6], ticks: [10, 10], cooldown: 400, cost: 4 },
-    pull: { strength: [2.4, 9], range: [20, 10], hold: 10, cooldown: 200, cost: 3 }, // only a weaker enemy
+    pull: { strength: [2.4, 9], range: [20, 10], hold: 4, cooldown: 500, cost: 3 }, // only a weaker enemy
   },
   abilityReviewEvery: 500,     // ticks between checks on which abilities each species has
   effectTicks: 12,             // how long the flash of an ability stays on the map
