@@ -100,7 +100,7 @@
   .handle { display: none; }
   .tabs { display: flex; border-bottom: 1px solid var(--border); flex: none; }
   .tabs button {
-    flex: 1; border: 0; border-radius: 0; padding: 11px 2px 9px; font-size: 13px; color: var(--text-secondary);
+    flex: 1; border: 0; border-radius: 0; padding: 11px 1px 9px; font-size: 12px; color: var(--text-secondary);
     border-bottom: 2px solid transparent;
   }
   .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 500; }
@@ -152,7 +152,12 @@
   #saves .meta { font-size: 12px; color: var(--text-muted); }
   #saves button { padding: 4px 10px; font-size: 12px; flex: none; }
   #saves button.sure { border-color: #e24b4a; color: #e24b4a; }
-  #events { list-style: none; margin: 0; padding: 0; }
+  #events, .bio { list-style: none; margin: 0; padding: 0; }
+  .bio { margin-top: 8px; }
+  .bio li { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .bio .when { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 62px; }
+  .records dd { text-align: right; }
+  .records .who { display: block; font-size: 12px; color: var(--text-muted); }
   #events li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
   #events .when { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 62px; }
   #events .pip, .toast .pip { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--text); }
@@ -369,6 +374,7 @@
       <button role="tab" data-tab="inspector" aria-selected="false">Inspector</button>
       <button role="tab" data-tab="charts" aria-selected="false">Charts</button>
       <button role="tab" data-tab="events" aria-selected="false">Events</button>
+      <button role="tab" data-tab="records" aria-selected="false">Records</button>
       <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
     </div>
 
@@ -404,6 +410,9 @@
         </dl>
         <h2>Ancestry</h2>
         <p class="ancestry" id="inspAncestry"></p>
+        <h2>Life story</h2>
+        <dl class="facts" id="bioCounts"></dl>
+        <ul class="bio" id="bio"></ul>
         <div class="buttons" style="margin-top:16px">
           <button id="inspFollow" aria-pressed="false">Follow</button>
           <button id="inspClear">Clear selection</button>
@@ -437,6 +446,14 @@
     <div class="panel" id="tab-events" role="tabpanel" hidden>
       <p class="hint" id="eventsEmpty">Nothing has happened yet. New species, evolution, abilities, extinctions, booms, crashes and weather will be listed here and marked on the timeline.</p>
       <ul id="events"></ul>
+    </div>
+
+    <div class="panel" id="tab-records" role="tabpanel" hidden>
+      <h2>This world</h2>
+      <dl class="facts" id="worldFacts"></dl>
+      <h2>Hall of fame</h2>
+      <dl class="facts records" id="records"></dl>
+      <p class="hint" style="margin-top:10px">Records cover this world since it began, including species that have died out. Loading a saved world from before records were kept starts them afresh.</p>
     </div>
 
     <div class="panel" id="tab-settings" role="tabpanel" hidden>

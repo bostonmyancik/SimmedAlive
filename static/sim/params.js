@@ -203,4 +203,5 @@ export const RULES = {
   trendFactor: 2,              // population must double (or halve) between checks...
   trendMinChange: 40,          // ...and change by at least this many creatures
   maxEvents: 500,
+  maxBiography: 200,           // most entries kept in a watched creature's life story
 };

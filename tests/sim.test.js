@@ -767,6 +767,57 @@ test('at night most creatures see half as far, and those with night eyes see ful
   assert.equal(timeOfDay(midnight), 'Night');
 });
 
+// ---------- Records and life stories ----------
+
+test('the hall of fame keeps its records, through a save and load too', () => {
+  const sim = run(4, 1500);
+  const r = sim.records;
+  assert.ok(r.births > 0 && r.deaths > 0);
+  assert.ok(r.peakPopulation.value >= sim.creatures.length);
+  assert.ok(r.peakSpecies.value > 0 && typeof r.peakSpecies.name === 'string');
+  assert.ok(r.highestGeneration.value >= Math.max(...sim.creatures.map((c) => c.generation)));
+  const copy = createSim({ seed: 4 });
+  copy.load(JSON.parse(JSON.stringify(sim.save())));
+  assert.deepEqual(copy.records, sim.records);
+  copy.generate(9);
+  assert.equal(copy.records.births, 0, 'a new world starts its records afresh');
+});
+
+test('a watched creature\'s life story notes how it died, and its killer\'s notes the kill', () => {
+  const setup = () => {
+    const sim = createSim({ seed: 7, params: { disease: false } });
+    sim.generate();
+    sim.food.clear();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const hunter = creature({ ...spot, species: 3, diet: 1, strength: 3, energy: 80, preferredTemp: temp, speed: 0.01 });
+    const prey = creature({ x: spot.x + 3, y: spot.y, species: 1, strength: 1, energy: 1, preferredTemp: temp, speed: 0.01 });
+    sim.creatures = [hunter, prey];
+    return { sim, hunter, prey };
+  };
+  let { sim, hunter, prey } = setup();
+  sim.watch(prey.id);
+  sim.step(0, 0);
+  assert.deepEqual(sim.biography.entries.map((e) => e.text), ['Killed by a Nightstalker']);
+  ({ sim, hunter, prey } = setup());
+  sim.watch(hunter.id);
+  sim.step(0, 0);
+  assert.equal(sim.biography.counts.kills, 1);
+  assert.deepEqual(sim.biography.entries.map((e) => e.text), ['Killed a Meadowfolk']);
+  sim.watch(null);
+  assert.equal(sim.biography, null);
+});
+
+test('a watched creature that runs out of energy is noted as starved', () => {
+  const sim = emptyWorld();
+  const spot = findCell(sim, inlandMild);
+  const c = creature({ ...spot, energy: 0.05, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] });
+  sim.creatures = [c];
+  sim.watch(c.id);
+  sim.step(0, 0);
+  assert.deepEqual(sim.biography.entries.map((e) => e.text), ['Starved']);
+});
+
 const sim0 = () => createSim({ seed: 1 });
 
 // ---------- Random disasters ----------

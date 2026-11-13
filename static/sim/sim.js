@@ -116,6 +116,11 @@ export function createSim({ seed = 1, params = {} } = {}) {
     paintTemperature,
     save,
     load,
+    watch,
+    // Record holders for the hall of fame. See freshRecords().
+    records: freshRecords(),
+    // The life story of the creature being watched (see watch()), or null.
+    biography: null,
   };
 
   // Rebuilt at the start of every tick to find nearby enemies quickly.
@@ -168,6 +173,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     sim.temperatureBoost = 0;
     sim.droughtUntil = 0;
     sim.tempOffset.fill(0);
+    sim.records = freshRecords();
+    sim.biography = null;
 
     if (map === 'blank') {
       sim.water.fill(0);
@@ -397,6 +404,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     for (const c of sim.creatures) {
       if (c.species === target.id && c.energy > 0 && random() < RULES.plagueDeathRate) {
         c.energy = 0; // removed, leaving a carcass, at the end of the next tick
+        if (watched(c)) sim.biography.cause = 'Killed by a plague';
         died++;
       }
     }
@@ -412,6 +420,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     for (const c of sim.creatures) {
       if (c.energy > 0 && within(c, x, y, radius)) {
         c.energy = 0;
+        if (watched(c)) sim.biography.cause = 'Killed by a meteor';
         died++;
       }
     }
@@ -444,6 +453,62 @@ export function createSim({ seed = 1, params = {} } = {}) {
     }
   }
 
+  // ---------- Hall of fame ----------
+
+  // Each record names who holds it: { value, tick, name, color } where name
+  // and colour are its species'. `births` and `deaths` are plain totals.
+  function freshRecords() {
+    return { births: 0, deaths: 0, peakPopulation: null, peakSpecies: null, mostOffspring: null, highestGeneration: null };
+  }
+
+  // Takes a record if `value` beats it.
+  function beat(key, value, speciesId) {
+    const held = sim.records[key];
+    if (held && held.value >= value) return;
+    const sp = speciesId === null ? null : sim.species[speciesId];
+    sim.records[key] = { value, tick: sim.tick, name: sp ? sp.name : null, color: sp ? sp.color : null };
+  }
+
+  // Checks a creature against the records about individual creatures.
+  function creatureRecords(c) {
+    beat('mostOffspring', c.offspring, c.species);
+    beat('highestGeneration', c.generation, c.species);
+  }
+
+  // ---------- Life story ----------
+
+  // Starts (or with null, stops) keeping a life story of one creature from
+  // now on. The story is { id, since, entries: [{ tick, text }], counts }.
+  function watch(id) {
+    sim.biography = id === null || id === undefined ? null : {
+      id, since: sim.tick, entries: [], cause: null, fleeing: false, migrating: false,
+      counts: { plants: 0, carcasses: 0, kills: 0, young: 0, abilityUses: 0 },
+    };
+  }
+
+  const watched = (c) => sim.biography !== null && c.id === sim.biography.id;
+
+  function note(c, text) {
+    if (!watched(c)) return;
+    const entries = sim.biography.entries;
+    entries.push({ tick: sim.tick, text });
+    if (entries.length > RULES.maxBiography) entries.shift();
+  }
+
+  const aSpecies = (id) => {
+    const name = sim.species[id].name;
+    return (/^[aeiou]/i.test(name) ? 'an ' : 'a ') + name.replace(/s$/, '');
+  };
+
+  // A kill, from both sides. `how` is '' for a bite or ' with spit'.
+  function noteKill(killerId, killerSpecies, victim, how) {
+    if (sim.biography && sim.biography.id === killerId) {
+      sim.biography.counts.kills++;
+      sim.biography.entries.push({ tick: sim.tick, text: 'Killed ' + aSpecies(victim.species) + how });
+    }
+    if (watched(victim)) sim.biography.cause = 'Killed by ' + aSpecies(killerSpecies) + how;
+  }
+
   // ---------- Saving ----------
 
   // Everything needed to carry on later, as plain data that survives JSON.
@@ -468,6 +533,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
       food: [...sim.food].map((f) => [f.x, f.y]),
       carcasses: [...sim.carcasses].map((k) => [k.x, k.y, k.tick]),
       events: sim.events.map((e) => ({ ...e })),
+      records: JSON.parse(JSON.stringify(sim.records)),
     };
   }
 
@@ -523,6 +589,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
     });
     sim.projectiles = (data.projectiles || []).map((p) => ({ ...p }));
     sim.effects = [];
+    sim.records = { ...freshRecords(), ...JSON.parse(JSON.stringify(data.records || {})) }; // older saves start afresh
+    sim.biography = null;
 
     sim.food.clear();
     const wet = (x, y) => sim.water[cellIndex(x, y)] === 1;
@@ -602,6 +670,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
   function countSpecies() {
     for (const sp of sim.species) sp.count = 0;
     for (const c of sim.creatures) sim.species[c.species].count++;
+    beat('peakPopulation', sim.creatures.length, null);
 
     const trendCheck = sim.tick > 0 && sim.tick % RULES.trendCheckEvery === 0;
     livingSpecies = 0;
@@ -613,6 +682,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
         continue;
       }
       livingSpecies++;
+      if (sp.established) beat('peakSpecies', sp.count, sp.id);
       if (!sp.established && sp.count >= RULES.establishedAt) {
         sp.established = true;
         sp.lastTrendCount = sp.count;
@@ -673,6 +743,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
   // Notes when an ability has spread through most of a species, or died out of it.
   // Also notes when a species takes to the water, or leaves it.
   function reviewAbilities() {
+    for (const c of sim.creatures) creatureRecords(c);
     const held = sim.species.map(() => ({}));
     const swimmers = sim.species.map(() => 0);
     const nightEyed = sim.species.map(() => 0);
@@ -744,7 +815,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
         sim.projectiles.push({
           x: c.x, y: c.y,
           vx: Math.cos(angle) * rule.speedPx, vy: Math.sin(angle) * rule.speedPx,
-          species: c.species, damage: power.damage, stun: rule.stun,
+          species: c.species, owner: c.id, damage: power.damage, stun: rule.stun,
           ticks: Math.ceil(power.range / rule.speedPx) + 2,
         });
         used = true;
@@ -753,7 +824,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
       // Kept for when it matters: running away, closing in, or already fighting.
       if (enemyDistSq <= power.radius * power.radius && (fleeing || hunting || !outOfReach)) {
         creatureGrid.forEachNear(c.x, c.y, power.radius, (o) => {
-          if (o.energy > 0 && isHostile(c.species, o.species)) o.frozen = Math.max(o.frozen || 0, power.ticks);
+          if (o.energy > 0 && isHostile(c.species, o.species)) {
+            o.frozen = Math.max(o.frozen || 0, power.ticks);
+            note(o, 'Was frozen by ' + aSpecies(c.species));
+          }
         });
         sim.effects.push({ kind: 'freeze', tick: sim.tick, x: c.x, y: c.y, radius: power.radius });
         used = true;
@@ -771,6 +845,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
           enemy.y = y;
           creatureGrid.move(enemy, oldX, oldY);
           enemy.frozen = Math.max(enemy.frozen || 0, power.hold);
+          note(enemy, 'Was dragged in by ' + aSpecies(c.species));
           used = true;
         }
       }
@@ -778,6 +853,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (used) {
       c.cooldown = rule.cooldown;
       c.energy -= rule.cost;
+      if (watched(c)) {
+        if (!sim.biography.counts.abilityUses) note(c, 'Used its ' + ABILITY_NAMES[c.ability].toLowerCase() + ' for the first time while watched');
+        sim.biography.counts.abilityUses++;
+      }
     }
   }
 
@@ -795,7 +874,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
       if (hit) {
         hit.energy -= p.damage;
         hit.frozen = Math.max(hit.frozen || 0, p.stun || 0);
-        if (hit.energy <= 0) sim.species[p.species].kills++;
+        if (hit.energy <= 0) {
+          sim.species[p.species].kills++;
+          noteKill(p.owner, p.species, hit, ' with spit');
+        } else {
+          note(hit, 'Was hit by spit from ' + aSpecies(p.species));
+        }
         sim.effects.push({ kind: 'hit', tick: sim.tick, x: p.x, y: p.y });
       } else if (p.ticks > 0 && p.y >= 0 && p.y < HEIGHT) {
         flying.push(p);
@@ -908,11 +992,18 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (c.immune > 0) c.immune--;
     if (c.sick > 0) {
       creatureGrid.forEachNear(c.x, c.y, rule.contactRange, (o) => {
-        if (o.species === c.species && !o.sick && !o.immune && o.energy > 0 && random() < rule.spreadChance) o.sick = rule.length;
+        if (o.species === c.species && !o.sick && !o.immune && o.energy > 0 && random() < rule.spreadChance) {
+          o.sick = rule.length;
+          note(o, 'Caught a sickness from one of its own kind');
+        }
       });
-      if (--c.sick === 0) c.immune = rule.immunity;
+      if (--c.sick === 0) {
+        c.immune = rule.immunity;
+        note(c, 'Got over its sickness');
+      }
     } else if (!c.immune && random() < rule.outbreakChance) {
       c.sick = rule.length;
+      note(c, 'Fell sick');
     }
   }
 
@@ -993,7 +1084,10 @@ export function createSim({ seed = 1, params = {} } = {}) {
     if (enemy && enemyDistSq < RULES.attackRangeSq) {
       enemy.energy -= P.combatDamage * c.strength * (1 + P.dietDamageBonus * c.diet)
         * (stress > 0 ? P.awayDamageFactor : 1);
-      if (enemy.energy <= 0) sim.species[c.species].kills++;
+      if (enemy.energy <= 0) {
+        sim.species[c.species].kills++;
+        noteKill(c.id, c.species, enemy, '');
+      }
     }
 
     if (c.hydration < RULES.thirstyBelow) c.thirsty = true;
@@ -1021,6 +1115,15 @@ export function createSim({ seed = 1, params = {} } = {}) {
       move *= RULES.abilities.dash.speed;
     }
 
+    if (watched(c)) {
+      const bio = sim.biography;
+      if (mustFlee && !bio.fleeing) note(c, 'Ran from ' + aSpecies(enemy.species));
+      bio.fleeing = !!mustFlee;
+      const migrating = P.migration && stress > RULES.migrateAbove && !mustFlee && !c.thirsty && !canHunt;
+      if (migrating && !bio.migrating) note(c, 'Set off to find ' + (temp < c.preferredTemp ? 'somewhere warmer' : 'somewhere cooler'));
+      bio.migrating = migrating;
+    }
+
     if (swimming && !c.swimmer && headTowardLand(c, cell)) {
       // Out of its depth: make for the shore before anything else.
     } else if (mustFlee) {
@@ -1043,9 +1146,11 @@ export function createSim({ seed = 1, params = {} } = {}) {
           sim.carcasses.remove(meal);
           meal.eaten = true;
           c.energy += meatWorth;
+          if (watched(c)) sim.biography.counts.carcasses++;
         } else {
           sim.food.remove(meal);
           c.energy += plantWorth;
+          if (watched(c)) sim.biography.counts.plants++;
         }
         // Got what it was after: no need to keep working round anything.
         c.blocked = 0;
@@ -1108,6 +1213,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
       }
       assignSpecies(child);
       born.push(child);
+      sim.records.births++;
+      beat('highestGeneration', child.generation, child.species);
+      if (watched(c)) {
+        sim.biography.counts.young++;
+        note(c, child.species === c.species ? 'Had young' : 'Had young that founded or joined ' + sim.species[child.species].name);
+      }
     }
   }
 
@@ -1148,6 +1259,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
       if (c.energy > 0 && c.hydration > 0 && c.age < RULES.maxAge) {
         survivors.push(c);
       } else {
+        sim.records.deaths++;
+        creatureRecords(c);
+        if (watched(c)) {
+          const bio = sim.biography;
+          note(c, bio.cause || (c.age >= RULES.maxAge ? 'Died of old age' : c.hydration <= 0 ? 'Died of thirst' : 'Starved'));
+        }
         const carcass = { x: c.x, y: c.y, tick: sim.tick, eaten: false, wet: sim.water[cellIndex(c.x, c.y)] === 1 };
         sim.carcasses.add(carcass);
         carcassQueue.push(carcass);

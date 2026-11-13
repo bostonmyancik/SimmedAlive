@@ -254,6 +254,60 @@ function refreshInspector() {
     .map((id) => dot(sim.species[id].color) + sim.species[id].name).join(' &rarr; ') +
     '<br>Generation ' + c.generation + ' of its line.';
   $('inspFollow').disabled = selectedDiedAt !== null;
+  refreshBiography();
+}
+
+// What the selected creature has done since it was picked.
+function refreshBiography() {
+  const bio = sim.biography;
+  if (!bio) return;
+  const n = bio.counts;
+  $('bioCounts').innerHTML =
+    '<dt>Watched since</dt><dd>Tick ' + fmt(bio.since) + '</dd>' +
+    '<dt>Plants eaten</dt><dd>' + fmt(n.plants) + '</dd>' +
+    '<dt>Carcasses eaten</dt><dd>' + fmt(n.carcasses) + '</dd>' +
+    '<dt>Kills</dt><dd>' + fmt(n.kills) + '</dd>' +
+    '<dt>Young</dt><dd>' + fmt(n.young) + '</dd>' +
+    (n.abilityUses ? '<dt>Ability used</dt><dd>' + fmt(n.abilityUses) + (n.abilityUses === 1 ? ' time' : ' times') + '</dd>' : '');
+  const key = bio.entries.length + ':' + (bio.entries.length ? bio.entries[bio.entries.length - 1].tick : 0);
+  if ($('bio').dataset.key === key) return;
+  $('bio').dataset.key = key;
+  $('bio').innerHTML = bio.entries.length
+    ? bio.entries.slice().reverse().map((e) => '<li><span class="when">Tick ' + fmt(e.tick) + '</span><span>' + e.text + '</span></li>').join('')
+    : '<li><span>Nothing much yet. Fights, kills, young, sickness and how it dies are noted here.</span></li>';
+}
+
+// ---------- Records ----------
+
+const holder = (r, unit) => r
+  ? fmt(r.value) + unit + '<span class="who">' + (r.name ? dot(r.color) + r.name + ', ' : '') + 'tick ' + fmt(r.tick) + '</span>'
+  : '–';
+
+function refreshRecords() {
+  if ($('tab-records').hidden) return;
+  const r = sim.records;
+  const shown = shownSpecies();
+  const best = (score) => shown.reduce((a, sp) => (!a || score(sp) > score(a) ? sp : a), null);
+  const lasted = (sp) => (sp.extinctTick ?? sim.tick) - sp.bornTick;
+  const longest = best(lasted), deadliest = best((sp) => sp.kills), evolved = best((sp) => sp.stage);
+  const speciesRecord = (sp, text) => sp
+    ? text + '<span class="who">' + dot(sp.color) + sp.name + (sp.count ? ', still alive' : ', died out at tick ' + fmt(sp.extinctTick)) + '</span>'
+    : '–';
+  const { year } = seasonAt(sim.tick);
+  $('worldFacts').innerHTML =
+    '<dt>Age</dt><dd>' + fmt(sim.tick) + ' ticks (year ' + year + ')</dd>' +
+    '<dt>Births</dt><dd>' + fmt(r.births) + '</dd>' +
+    '<dt>Deaths</dt><dd>' + fmt(r.deaths) + '</dd>' +
+    '<dt>Species that took hold</dt><dd>' + fmt(shown.length) + '</dd>' +
+    '<dt>Died out</dt><dd>' + fmt(shown.filter((sp) => sp.count === 0).length) + '</dd>';
+  $('records').innerHTML =
+    '<dt>Biggest population</dt><dd>' + holder(r.peakPopulation, ' creatures') + '</dd>' +
+    '<dt>Biggest species</dt><dd>' + holder(r.peakSpecies, ' members') + '</dd>' +
+    '<dt>Longest-lasting species</dt><dd>' + speciesRecord(longest, longest ? fmt(lasted(longest)) + ' ticks' : '') + '</dd>' +
+    '<dt>Most kills</dt><dd>' + speciesRecord(deadliest && deadliest.kills ? deadliest : null, deadliest ? fmt(deadliest.kills) : '') + '</dd>' +
+    '<dt>Most evolved</dt><dd>' + speciesRecord(evolved && evolved.stage > 1 ? evolved : null, evolved ? 'Stage ' + evolved.stage : '') + '</dd>' +
+    '<dt>Most young from one creature</dt><dd>' + holder(r.mostOffspring, '') + '</dd>' +
+    '<dt>Longest family line</dt><dd>' + holder(r.highestGeneration, ' generations') + '</dd>';
 }
 
 function setFollowing(on) {
@@ -265,6 +319,7 @@ function setFollowing(on) {
 function select(creature) {
   selected = creature;
   selectedDiedAt = null;
+  sim.watch(creature ? creature.id : null);
   setFollowing(false);
   refreshInspector();
   if (creature) showTab('inspector');
@@ -292,6 +347,7 @@ function showTab(name) {
     $('tab-' + tab.dataset.tab).hidden = !on;
   }
   $('sidebar').classList.add('open');
+  refreshRecords();
   drawCharts();
 }
 
@@ -350,6 +406,7 @@ function refreshWorldSettings() {
 
 function refreshAll() {
   refreshWorldSettings();
+  refreshRecords();
   refreshSpecies();
   refreshInspector();
   refreshEvents();
