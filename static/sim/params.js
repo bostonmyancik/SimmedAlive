@@ -24,8 +24,9 @@ export const DEFAULT_PARAMS = {
   // Combat
   combatDamage: 0.2,       // damage per tick per point of strength
   awayDamageFactor: 0.25,  // damage multiplier when fighting outside your climate
-  huntEnergy: 30,          // a half-meat-eater hunts below this energy; scales with diet
+  huntEnergy: 100,         // a half-meat-eater hunts below this energy; scales with diet
   dietDamageBonus: 3,      // extra damage for meat-eaters: times (1 + this * diet)
+  dietSpecialization: 1.2, // above 1, in-between diets get less from both plants and meat
   fleeDistance: 25,        // distance at which a creature flees a much stronger one
 
   // Upkeep and breeding

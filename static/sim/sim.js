@@ -836,6 +836,11 @@ export function createSim({ seed = 1, params = {} } = {}) {
     return true;
   }
 
+  // Share of a plant's or a carcass's energy a creature gets, from the share
+  // of its diet that is that kind of food. Above 1, `dietSpecialization` makes
+  // in-between diets digest both kinds less well, so specialists can compete.
+  const digests = (share) => share ** P.dietSpecialization;
+
   // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost
   // energy, and so does having an ability. Water runs low faster in the heat.
   function payUpkeep(c, stress, swimming, temp) {
@@ -871,8 +876,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
     // The best meal in sight: a plant or a carcass, weighing what this
     // creature's diet gets out of it against how far away it is.
-    const plantWorth = RULES.foodEnergy * (1 - c.diet);
-    const meatWorth = RULES.carcassEnergy * c.diet;
+    const plantWorth = RULES.foodEnergy * digests(1 - c.diet);
+    const meatWorth = RULES.carcassEnergy * digests(c.diet);
     // Only swimmers go for what is lying in water; the rest would just pace the shore.
     const reachable = c.swimmer ? undefined : onDryLand;
     const plant = plantWorth > 0 ? sim.food.nearest(c.x, c.y, visionSq, reachable) : null;

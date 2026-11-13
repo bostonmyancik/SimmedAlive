@@ -84,7 +84,7 @@ python3 -m unittest discover tests
 ## How the world works
 
 - **Terrain.** Plants grow best on fertile land near water, poorly in desert, and not at all on mountains. A few grow in water. Mountains cannot be crossed, and water only by swimmers.
-- **Diet.** Every creature has a `diet` from 0 (plants only) to 1 (meat only). A plant is worth less the more meat is in the diet, and a carcass is worth more. Every death leaves a carcass that rots after a while. Meat-eaters bite harder and hunt weaker species when hungry.
+- **Diet.** Every creature has a `diet` from 0 (plants only) to 1 (meat only). A plant is worth less the more meat is in the diet, and a carcass is worth more. An in-between diet digests both kinds less well than a specialist, so a half-and-half eater gets about 44% of a plant or a carcass rather than half (`dietSpecialization`). That keeps mixed eaters from out-competing the hunters for carcasses. Every death leaves a carcass that rots after a while. Meat-eaters bite harder and hunt weaker species they see unless they are nearly full: a pure meat-eater hunts below 200 energy, which is above where it splits.
 - **Swimming.** A share of creatures (20% by default, set in Settings) are born able to swim. Swimmers cross water, more slowly and at an energy cost, and reach the plants that grow in it; everyone else goes around. Swimming is a matter of chance at birth, not inherited.
 - **Getting around obstacles.** A creature blocked by water or mountains slides along the edge and holds that course for a while before heading for its target again, so it works its way round instead of pacing in front of it. A creature caught under newly painted water or mountains can always walk out.
 - **Size.** Strength makes a creature hit harder, but a heavier body is slower: each point of strength above 1 costs a quarter of its top speed, so a strength-3 creature moves at two thirds of its speed and a strength-5 one at half (`sizeSlowdown`). Small creatures can outrun big ones and reach food first, so a world keeps a mix of sizes instead of every species growing ever bigger.
@@ -121,6 +121,7 @@ The balance settings are `DEFAULT_PARAMS`:
 | `awayDamageFactor` | Damage multiplier when fighting outside your climate |
 | `huntEnergy` | Energy below which a half-meat-eater hunts weaker species (scales with diet) |
 | `dietDamageBonus` | Extra combat damage for meat-eaters |
+| `dietSpecialization` | Above 1, in-between diets get less from both plants and meat |
 | `fleeDistance` | Distance at which a creature flees a much stronger one |
 | `strengthUpkeep` | Energy upkeep cost of strength |
 | `sizeSlowdown` | Share of top speed lost per point of strength above 1 |
