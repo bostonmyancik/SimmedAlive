@@ -30,6 +30,7 @@ export const DEFAULT_PARAMS = {
 
   // Upkeep and breeding
   strengthUpkeep: 0.006,   // energy cost per tick of strength (times strength squared)
+  sizeSlowdown: 0.25,      // share of top speed lost per point of strength above 1, so strength 3 moves at 2/3 of its speed
   stressCost: 0.05,        // energy cost per tick per degree of temperature stress
   maxBreedingStress: 0,    // most stress at which a creature can still reproduce
   tempMutationScale: 2,    // how fast preferred temperature mutates
