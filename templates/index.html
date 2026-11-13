@@ -454,6 +454,12 @@
     </div>
 
     <div class="panel" id="tab-records" role="tabpanel" hidden>
+      <div class="buttons" style="margin-bottom:14px">
+        <button id="openReport">Full report</button>
+        <button id="expandReport">Report here</button>
+      </div>
+      <p class="hint" style="margin-top:-6px">Everything about this world on one page: every species living and extinct, creatures, records, events and settings, ready to print or download.</p>
+      <p class="hint" id="reportHint" hidden>The browser blocked the new window. Allow pop-ups for this page, or use Report here.</p>
       <h2>This world</h2>
       <dl class="facts" id="worldFacts"></dl>
       <h2>Hall of fame</h2>
@@ -546,7 +552,7 @@
   </footer>
 </div>
 <div class="overlay" id="chartsOverlay" hidden>
-  <div class="overlaybar"><span>Charts</span><button id="closeCharts">Close</button></div>
+  <div class="overlaybar"><span id="overlayTitle">Charts</span><button id="closeCharts">Close</button></div>
 </div>
 <script type="module" src="{{ url_for('static', filename='ui/main.js') }}"></script>
 </body>
