@@ -130,12 +130,22 @@ The balance settings are `DEFAULT_PARAMS`:
 | `awayDamageFactor` | Damage multiplier when fighting outside your climate |
 | `huntEnergy` | Energy below which a half-meat-eater hunts weaker species (scales with diet) |
 | `dietDamageBonus` | Extra combat damage for meat-eaters |
+| `hunterThrift` | Share of its body's upkeep a pure meat-eater saves (in proportion to diet) |
 | `dietSpecialization` | Above 1, in-between diets get less from both plants and meat |
 | `fleeDistance` | Distance at which a creature flees a much stronger one |
 | `strengthUpkeep` | Energy upkeep cost of strength |
 | `sizeSlowdown` | Share of top speed lost per point of strength above 1 |
 | `stressCost` | Energy cost per degree of temperature stress |
 | `maxBreedingStress` | Max stress at which a creature can still reproduce |
+| `lifespan` | Average age at which a creature dies of old age (a year is about 18,850 ticks) |
+| `lifespanSpread` | Each creature's lifespan is this share either side of the average, at random |
+| `matureAge` | Ticks before a newborn can have young of its own |
+| `breedEvery` | Shortest gap between one young and the next |
+| `breedRadius`, `foodPerYoung` | A creature only has young when there is this much food per member of its species within this many pixels |
+| `preyWorth` | How much one creature of another species counts as food for a meat-eater in that check |
+| `smellRange` | How far a hungry creature can smell food it cannot see |
+| `restPace` | Share of its speed a full creature ambles at |
+| `fullAt` | A creature stops eating above this many times the energy it needs to breed |
 | `tempMutationScale` | How fast preferred temperature mutates |
 | `swimmerShare` | Chance that a creature is born able to swim |
 | `autoDisasters` | Whether disasters strike by themselves (the "Random disasters" switch) |
@@ -147,4 +157,4 @@ The balance settings are `DEFAULT_PARAMS`:
 | `abilities` | Whether creatures gain and use special abilities (the "Special abilities" switch) |
 | `abilityChance` | Chance a newborn gains an ability, times its species' stage |
 
-Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, lifespan, trait limits, the cap on living species, disaster strengths, each ability's strength range, power and cooldown) are in `RULES` in the same file.
+Less commonly changed rules (energy from plants and carcasses, terrain fertility, population cap, trait limits, the cap on living species, disaster strengths, each ability's strength range, power and cooldown) are in `RULES` in the same file.

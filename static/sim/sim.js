@@ -35,6 +35,7 @@ const CREATURE_FIELDS = [
   'id', 'parentId', 'species', 'x', 'y', 'heading', 'energy', 'hydration', 'thirsty', 'age',
   'bornTick', 'generation', 'offspring', ...TRAITS, 'swimmer', 'detour', 'blocked', 'slide',
   'ability', 'cooldown', 'frozen', 'dashing', 'sick', 'immune', 'nightEyes',
+  'lifespan', 'breedWait',
 ];
 
 // How the event log describes a species changing, trait by trait: [more, less].
@@ -247,7 +248,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
           x = (cell % GRID_W + random()) * CELL;
           y = (Math.floor(cell / GRID_W) + random()) * CELL;
         }
-        sim.creatures.push(spawnCreature(nextCreatureId++, id, founder, x, y, P.swimmerShare, random));
+        const c = spawnCreature(nextCreatureId++, id, founder, x, y, P.swimmerShare, random);
+        // Founders come at all ages, so they do not all grow old and die together.
+        c.lifespan = drawLifespan();
+        c.age = Math.floor(random() * c.lifespan * 0.6);
+        c.breedWait = c.age < P.matureAge ? P.matureAge - c.age : Math.floor(random() * P.breedEvery);
+        sim.creatures.push(c);
       }
     });
     countSpecies();
@@ -619,6 +625,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       c.sick = c.sick || 0; // saves from before sickness existed
       c.immune = c.immune || 0;
       c.nightEyes = !!c.nightEyes; // saves from before day and night
+      c.lifespan = c.lifespan || P.lifespan; // saves from before the life cycle
+      c.breedWait = c.breedWait || 0;
       return c;
     });
     sim.projectiles = (data.projectiles || []).map((p) => ({ ...p }));
@@ -971,8 +979,6 @@ export function createSim({ seed = 1, params = {} } = {}) {
     c.heading += turn * P.herding;
   }
 
-  const onDryLand = (item) => !item.wet;
-
   // Points a creature that is in the water but cannot swim at the nearest dry
   // land, searching outward a ring of cells at a time.
   function headTowardLand(c, cell) {
@@ -999,6 +1005,31 @@ export function createSim({ seed = 1, params = {} } = {}) {
   function canEnter(c, from, to) {
     if (sim.terrain[to] === MOUNTAIN) return sim.terrain[from] === MOUNTAIN;
     if (sim.water[to]) return c.swimmer || sim.water[from] === 1;
+    return true;
+  }
+
+  // The nearest food a hungry creature can smell beyond its sight: plants for
+  // a plant-eater; carcasses, or else creatures it could hunt, for a meat-eater.
+  function smellFood(c, reachable, edible) {
+    const rangeSq = P.smellRange * P.smellRange;
+    if (c.diet < 0.5) return sim.food.nearest(c.x, c.y, rangeSq, reachable);
+    return sim.carcasses.nearest(c.x, c.y, rangeSq, edible)
+      || creatureGrid.nearest(c.x, c.y, rangeSq, (o) => o.energy > 0 && isHostile(c.species, o.species)
+        && o.strength < c.strength * RULES.huntStrengthRatio && !hiddenFrom(o, (o.x - c.x) ** 2 + (o.y - c.y) ** 2));
+  }
+
+  // Whether a creature could walk in a straight line to a spot, without water
+  // (unless it swims) or mountains in the way. Food behind a lake is not worth
+  // heading for: it would only pace the shore.
+  function straightPath(c, to) {
+    const dx = to.x - c.x, dy = to.y - c.y;
+    const steps = Math.ceil(Math.sqrt(dx * dx + dy * dy) / (CELL / 2));
+    let from = cellIndex(c.x, c.y);
+    for (let i = 1; i <= steps; i++) {
+      const cell = cellIndex(c.x + dx * i / steps, c.y + dy * i / steps);
+      if (cell !== from && !canEnter(c, from, cell)) return false;
+      from = cell;
+    }
     return true;
   }
 
@@ -1069,13 +1100,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
   // Upkeep: being fast, sharp-eyed, strong or out of your climate all cost
   // energy, and so does having an ability. Water runs low faster in the heat.
   function payUpkeep(c, stress, swimming, temp) {
-    c.energy -= 0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
-      + P.strengthUpkeep * c.strength * c.strength + P.stressCost * stress
+    c.energy -= (0.08 + 0.035 * c.speed * c.speed + 0.0025 * c.vision
+      + P.strengthUpkeep * c.strength * c.strength) * (1 - P.hunterThrift * c.diet) + P.stressCost * stress
       + (swimming ? RULES.swimCost : 0) + (c.ability ? RULES.abilityUpkeep : 0)
       + (c.sick > 0 ? RULES.sickness.cost : 0);
     c.hydration -= RULES.thirstRate * (1 + Math.max(0, temp - RULES.hotAbove) / 12)
       * (inDrought() ? RULES.droughtThirstFactor : 1);
     c.age++;
+    if (c.breedWait > 0) c.breedWait--;
   }
 
   // Fight, decide where to go, move, pay upkeep, breed.
@@ -1107,18 +1139,21 @@ export function createSim({ seed = 1, params = {} } = {}) {
     const plantWorth = RULES.foodEnergy * digests(1 - c.diet);
     const meatWorth = RULES.carcassEnergy * digests(c.diet);
     // Only swimmers go for what is lying in water; the rest would just pace the shore.
-    const reachable = c.swimmer ? undefined : onDryLand;
-    const plant = plantWorth > 0 ? sim.food.nearest(c.x, c.y, visionSq, reachable) : null;
+    const reachable = (item) => (c.swimmer || !item.wet) && straightPath(c, item);
+    // A full creature leaves food for others.
+    const full = c.energy >= breedEnergy(c) * P.fullAt;
+    const plant = plantWorth > 0 && !full ? sim.food.nearest(c.x, c.y, visionSq, reachable) : null;
     // Nobody eats its own kind.
-    const edible = (k) => k.species !== c.species && (c.swimmer || !k.wet);
-    const carcass = meatWorth > 0 ? sim.carcasses.nearest(c.x, c.y, visionSq, edible) : null;
+    const edible = (k) => k.species !== c.species && reachable(k);
+    const carcass = meatWorth > 0 && !full ? sim.carcasses.nearest(c.x, c.y, visionSq, edible) : null;
     const appeal = (item, worth) => (item ? worth / (Math.sqrt(distSqTo(item)) + 20) : 0);
+    const mealAppeal = Math.max(appeal(carcass, meatWorth), appeal(plant, plantWorth));
     const meal = appeal(carcass, meatWorth) > appeal(plant, plantWorth) ? carcass : plant;
     const mealDistSq = meal ? distSqTo(meal) : visionSq;
 
-    // Fight any enemy within reach. Meat-eaters bite harder; everyone hits
-    // weaker outside their climate.
-    if (enemy && enemyDistSq < RULES.attackRangeSq) {
+    // Fight any enemy within reach, unless it is one to run from. Meat-eaters
+    // bite harder; everyone hits weaker outside their climate.
+    if (enemy && enemyDistSq < RULES.attackRangeSq && enemy.strength <= c.strength * RULES.fleeStrengthRatio) {
       enemy.energy -= P.combatDamage * c.strength * (1 + P.dietDamageBonus * c.diet)
         * (stress > 0 ? P.awayDamageFactor : 1);
       if (enemy.energy <= 0) {
@@ -1144,7 +1179,7 @@ export function createSim({ seed = 1, params = {} } = {}) {
     const canHunt = enemy
       && enemy.strength < c.strength * RULES.huntStrengthRatio
       && c.energy < P.huntEnergy * 2 * c.diet
-      && (!meal || enemyDistSq < mealDistSq);
+      && (!meal || appeal(enemy, meatWorth) > mealAppeal); // prey is worth chasing past a poorer meal
 
     useAbility(c, enemy, enemyDistSq, mustFlee, canHunt);
     if (c.dashing > 0) {
@@ -1156,11 +1191,13 @@ export function createSim({ seed = 1, params = {} } = {}) {
       const bio = sim.biography;
       if (mustFlee && !bio.fleeing) note(c, 'Ran from ' + aSpecies(enemy.species));
       bio.fleeing = !!mustFlee;
-      const migrating = P.migration && stress > RULES.migrateAbove && !mustFlee && !c.thirsty && !canHunt;
+      const migrating = P.migration && stress > RULES.migrateAbove && !mustFlee && !c.thirsty && !canHunt
+        && !(meal && c.energy < breedEnergy(c));
       if (migrating && !bio.migrating) note(c, 'Set off to find ' + (temp < c.preferredTemp ? 'somewhere warmer' : 'somewhere cooler'));
       bio.migrating = migrating;
     }
 
+    let scent;
     if (swimming && !c.swimmer && headTowardLand(c, cell)) {
       // Out of its depth: make for the shore before anything else.
     } else if (mustFlee) {
@@ -1172,8 +1209,8 @@ export function createSim({ seed = 1, params = {} } = {}) {
       } else {
         headTowardWater(c, cell);
       }
-    } else if (P.migration && stress > RULES.migrateAbove && !canHunt) {
-      headTowardComfort(c, true); // far out of its climate: move on before stopping to feed
+    } else if (P.migration && stress > RULES.migrateAbove && !canHunt && !(meal && c.energy < breedEnergy(c))) {
+      headTowardComfort(c, true); // far out of its climate: move on, stopping only for a meal when hungry
     } else if (canHunt) {
       c.heading = Math.atan2(enemy.y - c.y, enemy.x - c.x);
     } else if (meal) {
@@ -1194,9 +1231,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
         c.slide = null;
         c.detour = 0;
       }
+    } else if (c.energy < breedEnergy(c) && (scent = smellFood(c, reachable, edible))) {
+      // Hungry with nothing in sight: follow its nose, even if that means
+      // putting up with a little heat or cold.
+      c.heading = Math.atan2(scent.y - c.y, scent.x - c.x);
     } else if (stress > 0) {
       headTowardComfort(c);
     } else {
+      if (full) move *= P.restPace; // nothing it needs: stay on good ground
       c.heading += (random() - 0.5) * 0.5; // wander
       // Only a well-fed creature keeps to its herd; a hungry one roams for food.
       // (Not on a mountain, where it may be stranded and should keep moving.)
@@ -1240,10 +1282,12 @@ export function createSim({ seed = 1, params = {} } = {}) {
 
     // Well-fed, comfortable creatures split in two. Bigger ones need more energy first.
     const roomLeft = sim.creatures.length + born.length < RULES.maxCreatures;
-    if (c.energy > breedEnergy(c) && stress <= P.maxBreedingStress && roomLeft) {
+    if (c.breedWait <= 0 && c.energy > breedEnergy(c) && stress <= P.maxBreedingStress && roomLeft && roomToRaise(c)) {
       c.energy /= 2;
       c.offspring++;
+      c.breedWait = P.breedEvery;
       const child = makeOffspring(nextCreatureId++, c, sim.tick, mutationRate, P, random);
+      child.lifespan = drawLifespan();
       const chance = P.abilities ? P.abilityChance * sim.species[c.species].stage : 0;
       if (inheritAbility(child, c, chance, random)) {
         logEvent('mutation', 'A newborn ' + sim.species[c.species].name + ' gained ' + ABILITY_NAMES[child.ability], c.species);
@@ -1257,6 +1301,26 @@ export function createSim({ seed = 1, params = {} } = {}) {
         note(c, child.species === c.species ? 'Had young' : 'Had young that founded or joined ' + sim.species[child.species].name);
       }
     }
+  }
+
+  // Whether there is enough food nearby for one more of its kind: plants for
+  // a plant-eater, other species to hunt for a meat-eater, shared among every
+  // member of its species close by.
+  function roomToRaise(c) {
+    const r = P.breedRadius;
+    let plants = 0, prey = 0, kin = 1;
+    if (c.diet < 1) sim.food.forEachNear(c.x, c.y, r, () => { plants++; });
+    creatureGrid.forEachNear(c.x, c.y, r, (o) => {
+      if (o === c) return;
+      if (o.species === c.species) kin++;
+      else if (isHostile(c.species, o.species)) prey++;
+    });
+    return plants * (1 - c.diet) + prey * c.diet * P.preyWorth >= P.foodPerYoung * kin;
+  }
+
+  // How long a newborn will live if nothing kills it first.
+  function drawLifespan() {
+    return Math.round(P.lifespan * (1 + (random() * 2 - 1) * P.lifespanSpread));
   }
 
   // ---------- The tick ----------
@@ -1293,14 +1357,14 @@ export function createSim({ seed = 1, params = {} } = {}) {
     // The dead leave carcasses; the newborn join in.
     const survivors = [];
     for (const c of sim.creatures) {
-      if (c.energy > 0 && c.hydration > 0 && c.age < RULES.maxAge) {
+      if (c.energy > 0 && c.hydration > 0 && c.age < c.lifespan) {
         survivors.push(c);
       } else {
         sim.records.deaths++;
         creatureRecords(c);
         if (watched(c)) {
           const bio = sim.biography;
-          note(c, bio.cause || (c.age >= RULES.maxAge ? 'Died of old age' : c.hydration <= 0 ? 'Died of thirst' : 'Starved'));
+          note(c, bio.cause || (c.age >= c.lifespan ? 'Died of old age' : c.hydration <= 0 ? 'Died of thirst' : 'Starved'));
         }
         const carcass = { x: c.x, y: c.y, tick: sim.tick, species: c.species, eaten: false, wet: sim.water[cellIndex(c.x, c.y)] === 1 };
         sim.carcasses.add(carcass);
