@@ -42,6 +42,8 @@ export function spawnCreature(id, species, traits, x, y, swimmerShare, random) {
     sick: 0,       // ticks left of being sick
     immune: 0,     // ticks left of being unable to catch sickness
     nightEyes: traits.diet > 0.5, // sees well at night, less well by day; hunting founders start with it
+    lifespan: 0,   // ticks it will live unless something kills it first; the sim sets this
+    breedWait: 0,  // ticks before it can have young
   };
 }
 
@@ -82,5 +84,7 @@ export function makeOffspring(id, parent, tick, mutationRate, params, random) {
     sick: 0,
     immune: 0,
     nightEyes: random() < RULES.nightEyesFlip ? !parent.nightEyes : !!parent.nightEyes,
+    lifespan: 0, // the sim sets this
+    breedWait: params.matureAge,
   };
 }

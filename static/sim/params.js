@@ -28,6 +28,7 @@ export const DEFAULT_PARAMS = {
   awayDamageFactor: 0.25,  // damage multiplier when fighting outside your climate
   huntEnergy: 100,         // a half-meat-eater hunts below this energy; scales with diet
   dietDamageBonus: 3,      // extra damage for meat-eaters: times (1 + this * diet)
+  hunterThrift: 0.6,         // share of its body's upkeep a pure meat-eater saves (in proportion to diet)
   dietSpecialization: 1.2, // above 1, in-between diets get less from both plants and meat
   fleeDistance: 25,        // distance at which a creature flees a much stronger one
 
@@ -36,6 +37,18 @@ export const DEFAULT_PARAMS = {
   sizeSlowdown: 0.25,      // share of top speed lost per point of strength above 1, so strength 3 moves at 2/3 of its speed
   stressCost: 0.05,        // energy cost per tick per degree of temperature stress
   maxBreedingStress: 0,    // most stress at which a creature can still reproduce
+
+  // Life cycle. A year is about 18,850 ticks.
+  lifespan: 26000,         // average age at which a creature dies of old age
+  lifespanSpread: 0.25,    // each creature's lifespan is this share either side of the average, at random
+  matureAge: 2500,         // ticks before a newborn can have young of its own
+  breedEvery: 3000,        // shortest gap between one young and the next
+  breedRadius: 40,         // pixels around a creature checked for food before it has young
+  foodPerYoung: 20,        // food needed there per member of its species before it can have young
+  preyWorth: 10,           // how much one creature of another species counts as food for a meat-eater
+  smellRange: 120,         // a hungry creature with no food in sight can smell plants this far off, in pixels
+  restPace: 0.25,          // share of its speed a full creature ambles at
+  fullAt: 2,               // a creature stops eating above this many times the energy it needs to breed
   tempMutationScale: 2,    // how fast preferred temperature mutates
 
   // Swimming
@@ -79,11 +92,10 @@ export const RULES = {
   startPerSpecies: 100,
   startFood: 600,
   maxFoodNearby: 10,           // plants stop sprouting where this many already crowd one patch of ground
-  maxFood: 1800,               // natural growth stops here (dropped food can exceed it)
+  maxFood: 3000,               // natural growth stops here (dropped food can exceed it)
   maxCreatures: 1800,
   maxFounders: 8,              // most founding species a world can start with
   maxStartCount: 200,          // most members a founding species can start with
-  maxAge: 3000,
 
   startEnergy: 60,
   foodEnergy: 28,

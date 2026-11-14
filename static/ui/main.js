@@ -239,7 +239,7 @@ function refreshInspector() {
   const splitAt = breedEnergy(c);
   setMeter('inspEnergy', Math.max(0, c.energy).toFixed(0) + ' (splits above ' + splitAt.toFixed(0) + ')', c.energy / splitAt);
   setMeter('inspWater', Math.max(0, c.hydration).toFixed(0) + ' of 100', c.hydration / 100);
-  setMeter('inspAge', fmt(c.age) + ' of ' + fmt(RULES.maxAge) + ' ticks', c.age / RULES.maxAge);
+  setMeter('inspAge', fmt(c.age) + ' of ' + fmt(c.lifespan) + ' ticks', c.age / c.lifespan);
   $('inspGen').textContent = c.generation;
   $('inspSpeed').textContent = c.speed.toFixed(2);
   $('inspVision').textContent = c.vision.toFixed(0);

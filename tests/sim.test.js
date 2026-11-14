@@ -17,9 +17,10 @@ function run(seed, ticks) {
   return sim;
 }
 
-// A world with no creatures or food, for placing creatures by hand.
-function emptyWorld() {
-  const sim = createSim({ seed: 7 });
+// A world with no creatures or food, for placing creatures by hand. Breeding
+// does not need food nearby here unless a test asks for it.
+function emptyWorld(params = {}) {
+  const sim = createSim({ seed: 7, params: { foodPerYoung: 0, ...params } });
   sim.generate();
   sim.creatures = [];
   sim.food.clear();
@@ -48,6 +49,7 @@ function creature(overrides) {
     id: nextId++, parentId: null, species: 1, x: 0, y: 0, heading: 0, energy: 60, hydration: 90,
     thirsty: false, age: 0, bornTick: 0, generation: 1, offspring: 0,
     speed: 1.7, vision: 30, strength: 1.3, preferredTemp: 18, diet: 0, swimmer: false, detour: 0, blocked: 0, slide: null,
+    lifespan: 20000, breedWait: 0,
     ...overrides,
   };
 }
@@ -89,7 +91,7 @@ test('the world has every kind of terrain, and water and mountains are blocked',
 test('the ecosystem keeps going: creatures breed, stay off mountains, and only swimmers enter water', () => {
   const sim = createSim({ seed: 42 });
   sim.generate();
-  for (let i = 0; i < 4000; i++) { // longer than one lifespan, so survivors were born in the sim
+  for (let i = 0; i < 4000; i++) {
     sim.step(1, 0.4);
     if (i % 100 !== 0) continue;
     for (const c of sim.creatures) {
@@ -102,8 +104,8 @@ test('the ecosystem keeps going: creatures breed, stay off mountains, and only s
   assert.ok(sim.creatures.some((c) => c.swimmer) && sim.creatures.some((c) => !c.swimmer));
   assert.ok(sim.creatures.length > 100, 'the population collapsed');
   assert.ok(sim.species.slice(0, SPECIES.length).filter((sp) => sp.count > 0).length >= 2, 'founders died out');
+  assert.ok(sim.creatures.some((c) => c.generation > 1), 'nobody was born');
   for (const c of sim.creatures) {
-    assert.ok(c.generation > 1);
     for (const key of ['x', 'y', 'energy', 'hydration', 'speed', 'vision', 'strength', 'preferredTemp', 'diet']) {
       assert.ok(Number.isFinite(c[key]), key + ' is not a number');
     }
@@ -231,7 +233,7 @@ test('the founders swim according to the swimmer share, and their young inherit 
     assert.ok(sim.creatures.every((c) => c.swimmer === (share === 1)));
   }
   // Over many births, about 1 in 50 young differs from its parent.
-  const sim = createSim({ seed: 7, params: { swimmerShare: 0 } });
+  const sim = createSim({ seed: 7, params: { swimmerShare: 0, foodPerYoung: 0 } });
   sim.generate();
   sim.food.clear();
   const spot = findCell(sim, inlandMild);
@@ -473,12 +475,137 @@ test('creatures die of old age, starvation and thirst', () => {
   const sim = emptyWorld();
   const spot = findCell(sim, inlandMild);
   sim.creatures = [
-    creature({ ...spot, age: RULES.maxAge - 1 }),
+    creature({ ...spot, age: 19999, lifespan: 20000 }),
     creature({ ...spot, energy: 0.01 }),
     creature({ ...spot, hydration: 0.01 }),
   ];
   sim.step(0, 0);
   assert.equal(sim.creatures.length, 0);
+});
+
+// ---------- The life cycle ----------
+
+test('creatures live about a year, each for its own span, and founders come at all ages', () => {
+  const sim = createSim({ seed: 3 });
+  sim.generate();
+  const { lifespan, lifespanSpread } = sim.params;
+  const spans = sim.creatures.map((c) => c.lifespan);
+  assert.ok(spans.every((s) => s >= lifespan * (1 - lifespanSpread) - 1 && s <= lifespan * (1 + lifespanSpread) + 1));
+  assert.ok(new Set(spans).size > spans.length / 2, 'lifespans vary');
+  assert.ok(Math.abs(spans.reduce((a, b) => a + b, 0) / spans.length - lifespan) < lifespan * 0.05);
+  const ages = sim.creatures.map((c) => c.age);
+  assert.ok(Math.max(...ages) > lifespan * 0.4 && Math.min(...ages) < lifespan * 0.1, 'founders are of all ages');
+  assert.ok(sim.creatures.every((c) => c.age < c.lifespan));
+});
+
+test('a newborn must grow up before it has young, and then waits between them', () => {
+  const sim = emptyWorld({ matureAge: 30, breedEvery: 20 });
+  const spot = findCell(sim, inlandMild);
+  const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+  const parent = creature({ ...spot, energy: 1000, preferredTemp: temp, strength: 0.2 });
+  sim.creatures = [parent];
+  sim.step(0, 0);
+  assert.equal(sim.creatures.length, 2);
+  const child = sim.creatures[1];
+  assert.equal(child.breedWait, 30);
+  assert.ok(child.lifespan > 0);
+  for (let i = 0; i < 19; i++) {
+    parent.energy = child.energy = 1000;
+    sim.step(0, 0);
+  }
+  assert.equal(parent.offspring, 1, 'it waited before its next young');
+  assert.equal(child.offspring, 0, 'too young to breed');
+  parent.energy = child.energy = 1000;
+  sim.step(0, 0);
+  assert.equal(parent.offspring, 2);
+  for (let i = 0; i < 10; i++) {
+    for (const c of sim.creatures) c.energy = 1000;
+    sim.step(0, 0);
+  }
+  assert.equal(child.offspring, 1, 'grown up');
+});
+
+test('a creature only has young where there is food nearby for one more of its kind', () => {
+  const young = (plants, kin) => {
+    const sim = emptyWorld({ foodPerYoung: 4, breedRadius: 40 });
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const parent = creature({ ...spot, energy: 150, preferredTemp: temp });
+    sim.creatures = [parent];
+    for (let i = 0; i < kin; i++) sim.creatures.push(creature({ x: spot.x + 5, y: spot.y + i, energy: 20, preferredTemp: temp }));
+    for (let i = 0; i < plants; i++) sim.addFood(spot.x + 30 * Math.cos(i), spot.y + 30 * Math.sin(i));
+    sim.step(0, 0);
+    return parent.offspring;
+  };
+  assert.equal(young(0, 0), 0, 'no food in reach');
+  assert.equal(young(4, 0), 1, 'enough for one');
+  assert.equal(young(6, 1), 0, 'not enough for two');
+  assert.equal(young(8, 1), 1, 'enough for two');
+});
+
+test('a full creature leaves food for others', () => {
+  const eats = (energy) => {
+    const sim = emptyWorld({ fullAt: 2 });
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const c = creature({ ...spot, energy, preferredTemp: temp, breedWait: 1e9 });
+    sim.creatures = [c];
+    sim.addFood(spot.x + 2, spot.y);
+    sim.step(0, 0);
+    return sim.food.size === 0;
+  };
+  assert.equal(eats(100), true);
+  assert.equal(eats(breedEnergy({ strength: 1.3 }) * 2 + 1), false);
+});
+
+test('a hungry creature follows its nose to a plant out of sight, but not one behind water', () => {
+  const heads = (food, energy = 40) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const c = creature({ ...spot, energy, vision: 20, heading: Math.PI, preferredTemp: temp });
+    sim.creatures = [c];
+    food(sim, spot);
+    sim.step(0, 0);
+    return Math.cos(c.heading) > 0.99;
+  };
+  const plantEast = (sim, spot) => sim.addFood(spot.x + 80, spot.y);
+  assert.equal(heads(plantEast), true);
+  assert.equal(heads(plantEast, 150), false, 'a well-fed one does not go looking');
+  assert.equal(heads((sim, spot) => {
+    plantEast(sim, spot);
+    sim.paintTerrain(spot.x + 40, spot.y, 8, 'water');
+  }), false, 'water in the way');
+});
+
+test('a creature does not bite an enemy it would run from', () => {
+  // Energy left after one tick, with and without the other one beside it.
+  const after = (smallStrength, together) => {
+    const sim = emptyWorld();
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const small = creature({ ...spot, species: 1, strength: smallStrength, energy: 100, preferredTemp: temp, breedWait: 1e9 });
+    const big = creature({ x: spot.x + 3, y: spot.y, species: 0, strength: 3, energy: 100, preferredTemp: temp, breedWait: 1e9 });
+    sim.creatures = together ? [small, big] : [big];
+    sim.step(0, 0);
+    return big.energy;
+  };
+  assert.equal(after(1, true), after(1, false), 'the weak one only ran');
+  assert.ok(after(2.8, true) < after(2.8, false), 'one nearly as strong fights back');
+});
+
+test('meat-eaters burn less energy than plant-eaters with the same body', () => {
+  const burn = (diet) => {
+    const sim = emptyWorld({ herding: 0 });
+    const spot = findCell(sim, inlandMild);
+    const temp = sim.temperature[cellIndex(spot.x, spot.y)];
+    const c = creature({ ...spot, diet, energy: 100, preferredTemp: temp, breedWait: 1e9 });
+    sim.creatures = [c];
+    sim.step(0, 0);
+    return 100 - c.energy;
+  };
+  const thrift = sim0().params.hunterThrift;
+  assert.ok(Math.abs(burn(1) - burn(0) * (1 - thrift)) < 1e-9);
 });
 
 test('parameter overrides apply without changing the defaults', () => {
@@ -726,8 +853,8 @@ test('a well-fed idle creature drifts toward others of its species', () => {
   assert.ok(gap(0.5) < gap(0) - 10);
 });
 
-test('a creature far out of its climate moves on before stopping to eat', () => {
-  const ate = (migration) => {
+test('a creature far out of its climate moves on, stopping to eat only when hungry', () => {
+  const ate = (migration, energy = 150) => {
     const sim = createSim({ seed: 7, params: { migration, disease: false, herding: 0 } });
     sim.generate();
     sim.creatures = [];
@@ -735,13 +862,14 @@ test('a creature far out of its climate moves on before stopping to eat', () => 
     const spot = findCell(sim, inlandMild);
     const temp = sim.temperature[cellIndex(spot.x, spot.y)];
     // It wants it much warmer, which lies south; the plant is to the north.
-    sim.creatures = [creature({ ...spot, preferredTemp: temp + RULES.migrateAbove + sim.params.tempTolerance + 5, energy: 40 })];
+    sim.creatures = [creature({ ...spot, preferredTemp: temp + RULES.migrateAbove + sim.params.tempTolerance + 5, energy })];
     sim.addFood(spot.x, spot.y - 12);
     for (let i = 0; i < 15; i++) sim.step(0, 0);
     return sim.food.size === 0;
   };
   assert.equal(ate(false), true);
   assert.equal(ate(true), false);
+  assert.equal(ate(true, 40), true, 'a hungry one stops for the meal it can see');
 });
 
 test('swimmers are a little slower on land', () => {
@@ -764,7 +892,8 @@ test('at night most creatures see half as far, and those with night eyes see ful
     sim.generate();
     sim.food.clear();
     const spot = findCell(sim, inlandMild);
-    const c = creature({ ...spot, vision: 30, nightEyes, heading: Math.PI, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] });
+    // Well fed, so it does not go by smell.
+    const c = creature({ ...spot, vision: 30, nightEyes, heading: Math.PI, energy: 150, preferredTemp: sim.temperature[cellIndex(spot.x, spot.y)] });
     sim.creatures = [c];
     sim.tick = tick;
     sim.addFood(spot.x + 20, spot.y);
@@ -998,7 +1127,7 @@ test('evolution keeps a drifting species together: its newborns no longer split 
   // species started. With evolution the species catches up with them, so a
   // newborn like them stays; without it, the newborn founds a new species.
   const speciesOfNewborn = (evolveEvery) => {
-    const sim = createSim({ seed: 7, params: { evolveEvery, evolveRate: 0.5 } });
+    const sim = createSim({ seed: 7, params: { evolveEvery, evolveRate: 0.5, foodPerYoung: 0 } });
     sim.generate();
     sim.creatures = [];
     sim.food.clear();
@@ -1029,7 +1158,7 @@ test('species from older saves start at stage 1 with no abilities', () => {
     delete sp.stageOrigin;
     delete sp.abilities;
   }
-  for (const values of data.creatures) values.length -= 4; // no ability fields
+  for (const values of data.creatures) values.length -= 6; // no life-cycle fields, and none of the fields before them
   delete data.projectiles;
   const restored = createSim({ seed: 1 });
   restored.generate();
@@ -1038,6 +1167,25 @@ test('species from older saves start at stage 1 with no abilities', () => {
   assert.deepEqual(restored.species[0].stageOrigin, restored.species[0].origin);
   assert.ok(restored.creatures.every((c) => c.ability === null && c.frozen === 0 && c.cooldown === 0));
   for (let i = 0; i < 100; i++) restored.step(1, 0.4);
+});
+
+test('creatures from saves before the life cycle get the usual lifespan and can breed', () => {
+  const sim = run(4, 50);
+  const data = JSON.parse(JSON.stringify(sim.save()));
+  for (const values of data.creatures) values.length -= 2; // no lifespan or breeding wait
+  const restored = createSim({ seed: 1 });
+  restored.generate();
+  restored.load(data);
+  assert.ok(restored.creatures.every((c) => c.lifespan === restored.params.lifespan && c.breedWait === 0));
+  assert.deepEqual(restored.creatures.map((c) => c.age), sim.creatures.map((c) => c.age));
+});
+
+test('a save keeps each creature\'s lifespan and breeding wait', () => {
+  const sim = run(4, 50);
+  const restored = createSim({ seed: 1 });
+  restored.generate();
+  restored.load(JSON.parse(JSON.stringify(sim.save())));
+  assert.deepEqual(restored.creatures.map((c) => [c.lifespan, c.breedWait]), sim.creatures.map((c) => [c.lifespan, c.breedWait]));
 });
 
 // ---------- Abilities ----------
